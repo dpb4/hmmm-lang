@@ -18,12 +18,24 @@ data Expr
     | EApp Expr Expr
     | EOp Operator Expr Expr
     | EVal Value
-    deriving (Show)
 
 data Operator
     = OAdd
     | OSub
-    deriving (Show)
+
+instance Show Operator where
+    show OAdd = "+"
+    show OSub = "-"
+
+instance Show Expr where
+    show e = case e of
+        EVar n -> show n
+        EIf c a b -> "if " ++ show c ++ " then " ++ show a ++ " else " ++ show b
+        EAbs p b -> "λ" ++ show p ++ " -> " ++ show b
+        ELet i v b -> "let " ++ show i ++ " = " ++ show v ++ " in " ++ show b
+        EApp f a -> show f ++ "(" ++ show a ++ ")"
+        EOp o a b -> show a ++ " " ++ show o ++ " " ++ show b
+        EVal v -> show v
 
 data Value
     = VInt Integer
