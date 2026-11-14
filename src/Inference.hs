@@ -203,10 +203,11 @@ infer = \case
         bodyt <- local (M.insert param paramt') (infer body)
         return $ TFun paramt bodyt
     ELet vid val body -> do
-        valt <- infer val
-        -- monomorphic let: no generalization until constraints are solved
-        let valt' = ForAll S.empty valt
-        bodyt <- local (M.insert vid valt') (infer body)
+        (valt, cs) <- listen (infer val)
+        s <- either throwError return $ runSolve cs
+        ctx <- asks (applySubst s)
+        let valtg = generalize ctx (applySubst s valt)
+        bodyt <- local (M.insert vid valtg . applySubst s) (infer body)
         return bodyt
     EApp fun arg -> do
         funt <- infer fun
@@ -239,14 +240,6 @@ unify (TFun in1 out1) (TFun in2 out2) = do
     return $ compose outs ins
 unify x y = throwError $ "Misc type mismatch " ++ show x ++ " and " ++ show y
 
--- unify a@(TFun in1 out1) b@(TFun in2 out2) -- Arrow (->) / other TCons
---     | a /= b = throwError $ "Type mismatch " ++ show a ++ " and " ++ show b
---     | otherwise = do
---         ins <- unify in1 in2
---         outs <- unify out1 out2
---         return $ compose outs ins
--- unify x y = throwError $ "Misc type mismatch " ++ show x ++ " and " ++ show y
-
 bind :: TypeVar -> Type -> Solve Subst
 bind v t
     | S.member v $ freeTypeVars t = throwError $ "Infinite type " ++ show v ++ " ~ " ++ show t -- Occurs check
@@ -270,24 +263,11 @@ doAll e = do
     s <- runSolve cs
     return (applySubst s t)
 
-exp1 :: Expr
-exp1 = ELet "foo" fun rest
-  where
-    fun = EAbs "x" (EOp OAdd (EVar "x") (EVal $ VInt 3))
-    rest = EApp (EVar "foo") (EVal $ VInt 5)
-
-exp2 :: Expr
-exp2 = ELet "foo" fun rest
-  where
-    fun = EAbs "x" (EOp OAdd (EVar "x") (EVal $ VInt 3))
-    rest = EApp (EVar "foo") (EVal $ VStr "c")
-
-doFormat :: Expr -> IO ()
-doFormat e =
-    let er = runInfer e
-     in case er of
-            Left s -> print s
-            Right (et, _, cs) -> do
-                print et
-                mapM_ print cs
-
+-- doFormat :: Expr -> IO ()
+-- doFormat e =
+--     let er = runInfer e
+--      in case er of
+--             Left s -> print s
+--             Right (et, _, cs) -> do
+--                 print et
+--                 mapM_ print cs
