@@ -124,7 +124,7 @@ instance Substitutable Polytype where
     applySubst s (ForAll qvs t) = ForAll qvs $ applySubst unquantified t
       where
         unquantified = (foldr M.delete s qvs)
-    freeTypeVars (ForAll qvs t) = S.difference qvs $ freeTypeVars t
+    freeTypeVars (ForAll qvs t) = S.difference (freeTypeVars t) qvs
 
 instance Substitutable Constraint where
     applySubst s (Constraint t1 t2) = Constraint t1' t2'
@@ -140,8 +140,12 @@ instance (Substitutable a) => Substitutable [a] where
     applySubst s = map (applySubst s)
     freeTypeVars l = foldr (S.union . freeTypeVars) S.empty l
 
+instance (Substitutable a) => Substitutable (M.Map k a) where
+    applySubst s = M.map (applySubst s)
+    freeTypeVars = freeTypeVars . M.elems
+
 compose :: Subst -> Subst -> Subst
-compose a b = M.map (applySubst b) (M.union a b)
+compose s1 s2 = M.map (applySubst s1) s2 `M.union` s1
 
 -- | universal closure over Type t
 generalize :: Context -> Type -> Polytype
@@ -200,9 +204,9 @@ infer = \case
         return $ TFun paramt bodyt
     ELet vid val body -> do
         valt <- infer val
-        ctx <- ask
-        let valtg = generalize ctx valt
-        bodyt <- local (M.insert vid valtg) (infer body)
+        -- monomorphic let: no generalization until constraints are solved
+        let valt' = ForAll S.empty valt
+        bodyt <- local (M.insert vid valt') (infer body)
         return bodyt
     EApp fun arg -> do
         funt <- infer fun
@@ -231,7 +235,7 @@ unify (TVar v) t = bind v t -- Var Left
 unify t (TVar v) = bind v t -- Var Right
 unify (TFun in1 out1) (TFun in2 out2) = do
     ins <- unify in1 in2
-    outs <- unify out1 out2
+    outs <- unify (applySubst ins out1) (applySubst ins out2)
     return $ compose outs ins
 unify x y = throwError $ "Misc type mismatch " ++ show x ++ " and " ++ show y
 
@@ -260,11 +264,11 @@ solve s ((Constraint t1 t2) : cs) = do
 runSolve :: [Constraint] -> Either String Subst
 runSolve = runExcept . solve M.empty
 
-doAll :: Expr -> Either String Subst
+doAll :: Expr -> Either String Type
 doAll e = do
-    (_, _, cs) <- runInfer e
+    (t, _, cs) <- runInfer e
     s <- runSolve cs
-    return s
+    return (applySubst s t)
 
 exp1 :: Expr
 exp1 = ELet "foo" fun rest
@@ -286,3 +290,4 @@ doFormat e =
             Right (et, _, cs) -> do
                 print et
                 mapM_ print cs
+
