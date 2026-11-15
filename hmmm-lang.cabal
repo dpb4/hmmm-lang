@@ -58,7 +58,11 @@ library
     import:           warnings
 
     -- Modules exported by the library.
-    exposed-modules:  Inference
+    exposed-modules:
+        Hmmm.Syntax
+        Hmmm.Types
+        Hmmm.Unify
+        Hmmm.Infer
 
     -- Modules included in this library but not exported.
     -- other-modules:
@@ -120,6 +124,11 @@ test-suite hmmm-lang-test
 
     -- The entrypoint to the test suite.
     main-is:          Main.hs
+    other-modules:
+        Helpers
+        Hmmm.TypesSpec
+        Hmmm.UnifySpec
+        Hmmm.InferSpec
 
     -- Test dependencies.
     build-depends:

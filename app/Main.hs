@@ -1,6 +1,6 @@
 module Main (main) where
 
-import qualified Inference ()
+import qualified Hmmm.Infer ()
 
 main :: IO ()
 main = do
