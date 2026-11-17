@@ -16,10 +16,12 @@ data Expr
     | EApp Expr Expr
     | EOp Operator Expr Expr
     | ELit Literal
+    deriving (Eq)
 
 data Operator
     = OAdd
     | OSub
+    deriving (Eq)
 
 instance Show Operator where
     show OAdd = "+"
@@ -40,4 +42,4 @@ data Literal
     = LInt Integer
     | LBool Bool
     | LStr String
-    deriving (Show)
+    deriving (Show, Eq)

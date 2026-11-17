@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Hmmm.InferSpec (endToEndTests, inferTests)
+import Hmmm.ParserSpec (parserTests)
 import Hmmm.TypesSpec (substitutionTests)
 import Hmmm.UnifySpec (unifyTests)
 import Test.Tasty
@@ -12,8 +13,12 @@ tests :: TestTree
 tests =
     testGroup
         "hmmm-lang"
-        [ substitutionTests
-        , unifyTests
-        , inferTests
-        , endToEndTests
+        [ testGroup
+            "TYPE INFERENCE"
+            [ substitutionTests
+            , unifyTests
+            , inferTests
+            , endToEndTests
+            ]
+        , parserTests
         ]

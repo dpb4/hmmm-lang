@@ -20,7 +20,7 @@ name:               hmmm-lang
 -- PVP summary:     +-+------- breaking API changes
 --                  | | +----- non-breaking API additions
 --                  | | | +--- code changes with no API change
-version:            0.1.0.0
+version:            0.2.0.0
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -63,6 +63,8 @@ library
         Hmmm.Types
         Hmmm.Unify
         Hmmm.Infer
+        Hmmm.Parser
+        Hmmm.Eval
 
     -- Modules included in this library but not exported.
     -- other-modules:
@@ -71,7 +73,7 @@ library
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    mtl ^>=2.3.1, containers ^>=0.7, base ^>=4.20.2.0
+    build-depends:    parsec ^>=3.1.18.0, mtl ^>=2.3.1, containers ^>=0.7, base ^>=4.20.2.0
 
     -- Directories containing source files.
     hs-source-dirs:   src
@@ -129,6 +131,7 @@ test-suite hmmm-lang-test
         Hmmm.TypesSpec
         Hmmm.UnifySpec
         Hmmm.InferSpec
+        Hmmm.ParserSpec
 
     -- Test dependencies.
     build-depends:
