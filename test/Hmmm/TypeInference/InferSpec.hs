@@ -1,4 +1,4 @@
-module Hmmm.InferSpec (inferTests, endToEndTests) where
+module Hmmm.TypeInference.InferSpec (inferTests, endToEndTests) where
 
 import qualified Data.Map as M
 import qualified Data.Set as S

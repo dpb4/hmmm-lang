@@ -1,4 +1,4 @@
-module Hmmm.TypesSpec (substitutionTests) where
+module Hmmm.TypeInference.TypesSpec (substitutionTests) where
 
 import qualified Data.Map as M
 import qualified Data.Set as S

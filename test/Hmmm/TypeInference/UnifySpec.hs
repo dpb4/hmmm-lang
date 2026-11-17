@@ -1,4 +1,4 @@
-module Hmmm.UnifySpec (unifyTests) where
+module Hmmm.TypeInference.UnifySpec (unifyTests) where
 
 import Control.Monad.Except (runExcept)
 import qualified Data.Map as M

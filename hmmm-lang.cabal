@@ -128,10 +128,11 @@ test-suite hmmm-lang-test
     main-is:          Main.hs
     other-modules:
         Helpers
-        Hmmm.TypesSpec
-        Hmmm.UnifySpec
-        Hmmm.InferSpec
         Hmmm.ParserSpec
+        Hmmm.TypeInference
+        Hmmm.TypeInference.TypesSpec
+        Hmmm.TypeInference.UnifySpec
+        Hmmm.TypeInference.InferSpec
 
     -- Test dependencies.
     build-depends:
