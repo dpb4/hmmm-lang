@@ -20,7 +20,7 @@ name:               hmmm-lang
 -- PVP summary:     +-+------- breaking API changes
 --                  | | +----- non-breaking API additions
 --                  | | | +--- code changes with no API change
-version:            0.5.1.0
+version:            0.6.0.0
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -133,6 +133,7 @@ test-suite hmmm-lang-test
         Hmmm.TypeInference.TypesSpec
         Hmmm.TypeInference.UnifySpec
         Hmmm.TypeInference.InferSpec
+        Hmmm.EvalSpec
 
     -- Test dependencies.
     build-depends:

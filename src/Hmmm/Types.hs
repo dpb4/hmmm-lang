@@ -25,8 +25,6 @@ data TypeConstructor t = TCFun t t deriving (Eq)
 instance (Show t) => Show (TypeConstructor t) where
     show (TCFun a b) = show a ++ " -> " ++ show b
 
---                     | List t
-
 data Type
     = T ConcreteType
     | TC (TypeConstructor Type)
@@ -35,11 +33,6 @@ data Type
 instance Show Type where
     show (T c) = show c
     show (TC t) = show t
-
--- data TypeMaybe
---     = TVar TypeVar
---     | TLit ConcreteType
---     | TC (TypeConstructor TypeMaybe)
 
 instance Show ConcreteType where
     show CInt = "Int"
@@ -61,10 +54,6 @@ data TypeMaybe
     | TVar TypeVar
     | TCon (TypeConstructor TypeMaybe)
     deriving (Eq)
-
-pattern a :-> b = TCFun a b
-
--- pattern [a] = TCList a
 
 instance Show TypeMaybe where
     show (TLit ct) = show ct

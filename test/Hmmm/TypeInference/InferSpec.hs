@@ -1,4 +1,4 @@
-module Hmmm.TypeInference.InferSpec (inferTests, endToEndTests, annotationTests) where
+module Hmmm.TypeInference.InferSpec (inferTests, endToEndTests, annotationTests, programTests) where
 
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -233,5 +233,133 @@ annotationTests =
                         (EIf (EApp (EVar "id") true) (EApp (EVar "id") (lit 1)) (lit 2))
                     )
                     @?= Right int
+            ]
+        ]
+
+-- whole programs
+
+str' :: String -> Expr
+str' = ELit . LStr
+
+app :: Expr -> [Expr] -> Expr
+app = foldl EApp
+
+-- | let foo (a: int): int = a + 1; let g = 9; foo g
+exampleProgram :: [TopExpr]
+exampleProgram =
+    [ fooDef
+    , TELet (plain "g") (lit 9)
+    , TEExpr (EApp (EVar "foo") (EVar "g"))
+    ]
+
+-- | let foo (a: int): int = a + 1
+fooDef :: TopExpr
+fooDef = TEFun ("foo" .: aInt) ["a" .: aInt] (EOp OAdd (EVar "a") (lit 1))
+
+-- | let add (a, b) = a + b
+addDef :: TopExpr
+addDef = TEFun (plain "add") [plain "a", plain "b"] (EOp OAdd (EVar "a") (EVar "b"))
+
+-- | let id (x) = x
+idDef :: TopExpr
+idDef = TEFun (plain "id") [plain "x"] (EVar "x")
+
+programTests :: TestTree
+programTests =
+    testGroup
+        "Programs"
+        [ testCase "example program" $ typeOfProgram exampleProgram @?= Right [int]
+        , testCase "only expressions have a result type, in order" $
+            typeOfProgram [TEExpr (lit 1), TELet (plain "g") true, TEExpr (EVar "g"), TEExpr (str' "s")]
+                @?= Right [int, bool, str]
+        , testCase "a program of only definitions has no result types" $
+            typeOfProgram [TELet (plain "g") (lit 1), idDef] @?= Right []
+        , testCase "top-level functions are curried" $
+            typeOfProgram [addDef, TEExpr (EVar "add")] @?= Right [int ~> int ~> int]
+        , testCase "partial application of a top-level function" $
+            -- let inc = add 1; inc
+            typeOfProgram [addDef, TELet (plain "inc") (EApp (EVar "add") (lit 1)), TEExpr (EVar "inc")]
+                @?= Right [int ~> int]
+        , testCase "top-level functions are polymorphic" $
+            typeOfProgram [idDef, TEExpr (EApp (EVar "id") true), TEExpr (EApp (EVar "id") (str' "s"))]
+                @?= Right [bool, str]
+        , testCase "top-level values are polymorphic" $
+            -- let id = \x -> x; id true; id 1
+            typeOfProgram
+                [ TELet (plain "id") (EAbs (plain "x") (EVar "x"))
+                , TEExpr (EApp (EVar "id") true)
+                , TEExpr (EApp (EVar "id") (lit 1))
+                ]
+                @?= Right [bool, int]
+        , testCase "a polymorphic function's type has the shape a -> a" $
+            case typeOfProgram [idDef, TEExpr (EVar "id")] of
+                Right [TCon (TCFun (TVar a) (TVar a'))] -> a @?= a'
+                other -> assertFailure $ "expected [a -> a], got " ++ show other
+        , testCase "parameters are monomorphic within the body" $
+            -- let f (g) = if g true then g 1 else 2
+            assertLeft
+                "should fail"
+                ( typeOfProgram
+                    [ TEFun
+                        (plain "f")
+                        [plain "g"]
+                        (EIf (EApp (EVar "g") true) (EApp (EVar "g") (lit 1)) (lit 2))
+                    ]
+                )
+        , testCase "higher-order function" $
+            -- let twice (f, x) = f (f x); twice (\y -> y + 1) 0
+            typeOfProgram
+                [ TEFun (plain "twice") [plain "f", plain "x"] (EApp (EVar "f") (EApp (EVar "f") (EVar "x")))
+                , TEExpr (app (EVar "twice") [EAbs (plain "y") (EOp OAdd (EVar "y") (lit 1)), lit 0])
+                ]
+                @?= Right [int]
+        , testCase "a definition is in scope for later items only" $
+            assertLeft "using g before its definition should fail" $
+                typeOfProgram [TEExpr (EVar "g"), TELet (plain "g") (lit 1)]
+        , testCase "later definitions shadow earlier ones" $
+            typeOfProgram [TELet (plain "g") (lit 1), TELet (plain "g") true, TEExpr (EVar "g")]
+                @?= Right [bool]
+        , testCase "top-level functions are not recursive (yet)" $
+            -- let f (x) = f x
+            assertLeft "f is not in scope in its own body" $
+                typeOfProgram [TEFun (plain "f") [plain "x"] (EApp (EVar "f") (EVar "x"))]
+        , testCase "top-level let ... in expression" $
+            typeOfProgram [TEExpr (ELet (plain "x") (lit 1) (EVar "x"))] @?= Right [int]
+        , testCase "type errors in unused definitions are reported" $
+            assertLeft "should fail" $
+                typeOfProgram [TELet (plain "g") (EOp OAdd (lit 1) true), TEExpr (lit 0)]
+        , testGroup
+            "Annotations"
+            [ testCase "parameter annotation is enforced" $
+                -- let f (x: int) = x; f true
+                assertLeft "should fail" $
+                    typeOfProgram [TEFun (plain "f") ["x" .: aInt] (EVar "x"), TEExpr (EApp (EVar "f") true)]
+            , testCase "matching return type" $
+                typeOfProgram [fooDef, TEExpr (EVar "foo")] @?= Right [int ~> int]
+            , testCase "return type annotation is enforced" $
+                -- let f (a: int): bool = a + 1
+                assertLeft "should fail" $
+                    typeOfProgram [TEFun ("f" .: aBool) ["a" .: aInt] (EOp OAdd (EVar "a") (lit 1))]
+            , testCase "return type annotation specializes a polymorphic function" $
+                -- let f (x): int = x; f
+                typeOfProgram [TEFun ("f" .: aInt) [plain "x"] (EVar "x"), TEExpr (EVar "f")]
+                    @?= Right [int ~> int]
+            , testCase "function return type" $
+                -- let k (x: int): int -> int = \y -> x; k 5 7
+                typeOfProgram
+                    [ TEFun ("k" .: aInt --> aInt) ["x" .: aInt] (EAbs (plain "y") (EVar "x"))
+                    , TEExpr (app (EVar "k") [lit 5, lit 7])
+                    ]
+                    @?= Right [int]
+            , testCase "function return type is enforced on the result" $
+                -- let k (x: int): int -> int = \y -> x; k 5 "s"
+                assertLeft "should fail" $
+                    typeOfProgram
+                        [ TEFun ("k" .: aInt --> aInt) ["x" .: aInt] (EAbs (plain "y") (EVar "x"))
+                        , TEExpr (app (EVar "k") [lit 5, str' "s"])
+                        ]
+            , testCase "value annotation is enforced" $
+                assertLeft "should fail" $
+                    typeOfProgram [TELet ("g" .: aStr) (lit 1)]
             ]
         ]

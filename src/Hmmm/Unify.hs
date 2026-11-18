@@ -21,15 +21,11 @@ unify (TCon t1) (TCon t2) = case (t1, t2) of
         ins <- unify in1 in2
         outs <- unify (applySubst ins out1) (applySubst ins out2)
         return $ compose outs ins
--- unify (TFun in1 out1) (TFun in2 out2) = do
---     ins <- unify in1 in2
---     outs <- unify (applySubst ins out1) (applySubst ins out2)
---     return $ compose outs ins
-unify x y = throwError $ "Misc type mismatch " ++ show x ++ " and " ++ show y
+unify x y = throwError $ "misc type mismatch " ++ show x ++ " and " ++ show y
 
 bind :: TypeVar -> TypeMaybe -> Solve Subst
 bind v t
-    | S.member v $ freeTypeVars t = throwError $ "Infinite type " ++ show v ++ " ~ " ++ show t -- Occurs check
+    | S.member v $ freeTypeVars t = throwError $ "infinite type " ++ show v ++ " ~ " ++ show t -- Occurs check
     | otherwise = return $ M.singleton v t
 
 solve :: Subst -> [Constraint] -> Solve Subst

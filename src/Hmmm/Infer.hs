@@ -9,11 +9,13 @@ module Hmmm.Infer (
     runInfer,
     generalize,
     typeOf,
+    typeOfProgram,
 ) where
 
 import Control.Monad.Except
 import Control.Monad.Identity
 import Control.Monad.RWS
+import Data.Foldable (traverse_)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Hmmm.Syntax
@@ -71,6 +73,30 @@ inferBinding (Bind n mt) = case mt of
         t <- fresh
         return (n, t)
 
+{- | infer a let-bound value, solve its constraints, and generalize it;
+returns the bound name, its polytype, and the substitution to apply to the context
+-}
+inferDefinition :: Binding -> Infer TypeMaybe -> Infer (Name, Polytype, Subst)
+inferDefinition bind inferVal = do
+    (vid, vidt) <- inferBinding bind
+    -- the annotation must be solved with val's constraints, before generalizing
+    (valt, cs) <- listen $ do
+        t <- inferVal
+        constrain vidt t
+        return t
+    s <- either throwError return $ runSolve cs
+    ctx <- asks (applySubst s)
+    return (vid, generalize ctx (applySubst s valt), s)
+
+-- | infer a top-level function: params -> ... -> body, with an optional return type
+inferFun :: [Binding] -> Maybe Type -> Expr -> Infer TypeMaybe
+inferFun params rett body = do
+    ps <- traverse inferBinding params
+    let mono = M.fromList [(n, ForAll S.empty t) | (n, t) <- ps]
+    bodyt <- local (M.union mono) (infer body)
+    traverse_ (constrain bodyt . typeToMaybe) rett
+    return $ foldr (tfun . snd) bodyt ps
+
 -- | infer the type of an expression
 infer :: Expr -> Infer TypeMaybe
 infer = \case
@@ -97,17 +123,8 @@ infer = \case
         bodyt <- local (M.insert param paramt') (infer body)
         return $ tfun paramt bodyt
     ELet bind val body -> do
-        (vid, vidt) <- inferBinding bind
-        -- the annotation must be solved with val's constraints, before generalizing
-        (valt, cs) <- listen $ do
-            t <- infer val
-            constrain vidt t
-            return t
-        s <- either throwError return $ runSolve cs
-        ctx <- asks (applySubst s)
-        let valtg = generalize ctx (applySubst s valt)
-        bodyt <- local (M.insert vid valtg . applySubst s) (infer body)
-        return bodyt
+        (vid, valtg, s) <- inferDefinition bind (infer val)
+        local (M.insert vid valtg . applySubst s) (infer body)
     EApp fun arg -> do
         funt <- infer fun
         argt <- infer arg
@@ -136,3 +153,23 @@ typeOf e = do
     (t, _, cs) <- runInfer e
     s <- runSolve cs
     return (applySubst s t)
+
+inferProgram :: [TopExpr] -> Infer [TypeMaybe]
+inferProgram [] = return []
+inferProgram (top : rest) = case top of
+    TELet bind val -> define bind (infer val)
+    TEFun (Bind name rett) params body -> define (Bind name Nothing) (inferFun params rett body)
+    TEExpr e -> do
+        (t, cs) <- listen (infer e)
+        s <- either throwError return $ runSolve cs
+        (applySubst s t :) <$> inferProgram rest
+  where
+    define bind val = do
+        (name, t, s) <- inferDefinition bind val
+        local (M.insert name t . applySubst s) (inferProgram rest)
+
+-- | the type of each top-level expression in a program, in order
+typeOfProgram :: [TopExpr] -> Either String [TypeMaybe]
+typeOfProgram prog = do
+    (ts, _, _) <- runIdentity $ runExceptT $ runRWST (inferProgram prog) M.empty 0
+    return ts

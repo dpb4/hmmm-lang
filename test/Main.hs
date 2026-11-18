@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Hmmm.EvalSpec (evalTests)
 import Hmmm.ParserSpec (parserTests)
 import Hmmm.TypeInference (typeInferenceTests)
 import Test.Tasty
@@ -13,4 +14,5 @@ tests =
         "hmmm-lang"
         [ parserTests
         , typeInferenceTests
+        , evalTests
         ]

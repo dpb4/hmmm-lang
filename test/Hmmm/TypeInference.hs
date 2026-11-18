@@ -1,7 +1,7 @@
 -- | all type inference tests; one module under TypeInference/ per source module
 module Hmmm.TypeInference (typeInferenceTests) where
 
-import Hmmm.TypeInference.InferSpec (annotationTests, endToEndTests, inferTests)
+import Hmmm.TypeInference.InferSpec (annotationTests, endToEndTests, inferTests, programTests)
 import Hmmm.TypeInference.TypesSpec (substitutionTests)
 import Hmmm.TypeInference.UnifySpec (unifyTests)
 import Test.Tasty
@@ -15,4 +15,5 @@ typeInferenceTests =
         , inferTests
         , endToEndTests
         , annotationTests
+        , programTests
         ]

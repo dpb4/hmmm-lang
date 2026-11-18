@@ -1,17 +1,36 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Main (main) where
 
+import Control.Exception (IOException, try)
 import Control.Monad (unless)
 import Hmmm.Eval
-import Hmmm.Infer (typeOf)
+import Hmmm.Infer (typeOf, typeOfProgram)
 import Hmmm.Parser
-import System.IO (isEOF)
+import System.Environment (getArgs, getProgName)
+import System.Exit (exitFailure)
+import System.IO (hPutStrLn, isEOF, stderr)
 
+-- | with no arguments, start a REPL; with a file path, run that file
 main :: IO ()
-main = do
+main =
+    getArgs >>= \args -> case args of
+        [] -> repl
+        [path] ->
+            try (readFile path) >>= \case
+                Left e -> failWith $ show (e :: IOException)
+                Right source -> runFile source
+        _ -> do
+            name <- getProgName
+            hPutStrLn stderr $ "usage: " ++ name ++ " [FILE]"
+            exitFailure
+
+repl :: IO ()
+repl = do
     eof <- isEOF
     unless eof $ do
         getLine >>= run
-        main
+        repl
 
 run :: String -> IO ()
 run line =
@@ -22,3 +41,16 @@ run line =
             Right t -> case runEval expr of
                 Left err -> putStrLn $ "runtime error:\n" ++ err
                 Right v -> putStrLn ("-> " ++ show v ++ " : " ++ show t)
+
+runFile :: String -> IO ()
+runFile source =
+    case runParseTopExprs source of
+        Left err -> failWith $ "parse error:\n" ++ err
+        Right prog -> case typeOfProgram prog of
+            Left err -> failWith $ "type error:\n" ++ err
+            Right _ -> case runEvalProgram prog of
+                Left err -> failWith $ "runtime error:\n" ++ err
+                Right vs -> mapM_ print vs
+
+failWith :: String -> IO ()
+failWith msg = hPutStrLn stderr msg >> exitFailure

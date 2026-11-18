@@ -3,12 +3,13 @@
 module Hmmm.Eval (
     eval,
     runEval,
-    Value,
+    runEvalProgram,
+    Value (..),
 ) where
 
 import Control.Monad.Except
 import Control.Monad.Reader
-import Data.Map as M
+import qualified Data.Map as M
 import Hmmm.Syntax
 
 type Env = M.Map Name Value
@@ -18,6 +19,7 @@ data Value
     | VBool Bool
     | VStr String
     | VClosure Env Name Expr
+    deriving (Eq)
 
 instance Show Value where
     show (VInt i) = show i
@@ -29,6 +31,20 @@ type Eval a = ReaderT Env (Except String) a
 
 runEval :: Expr -> Either String Value
 runEval e = runExcept (runReaderT (eval e) M.empty)
+
+runEvalProgram :: [TopExpr] -> Either String [Value]
+runEvalProgram prog = runExcept (runReaderT (evalProgram prog) M.empty)
+
+evalProgram :: [TopExpr] -> Eval [Value]
+evalProgram [] = return []
+evalProgram (top : rest) = case top of
+    TELet (Bind name _) val -> define name val
+    TEFun (Bind name _) params body -> define name (foldr EAbs body params)
+    TEExpr e -> (:) <$> eval e <*> evalProgram rest
+  where
+    define name val = do
+        v <- eval val
+        local (M.insert name v) (evalProgram rest)
 
 eval :: Expr -> Eval Value
 eval = \case
