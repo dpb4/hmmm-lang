@@ -10,6 +10,10 @@ module Hmmm.Parser (
     parseLet,
     parseLit,
     parseType,
+    runParseTopExprs,
+    parseTopExpr,
+    parseTopLet,
+    parseTopFun,
 ) where
 
 import Hmmm.Syntax
@@ -41,7 +45,7 @@ lexer =
             { Tok.identStart = satisfy (\c -> isLetter c && c /= 'λ')
             , Tok.identLetter = alphaNum
             , Tok.reservedNames = ["if", "then", "else", "let", "in", "true", "false"]
-            , Tok.reservedOpNames = ["+", "-", "->", "=", ":", "\\", "λ"]
+            , Tok.reservedOpNames = ["+", "-", "->", "=", ":", "\\", "λ", ","]
             }
 
 identifier :: Parser String
@@ -62,8 +66,8 @@ whiteSpace = Tok.whiteSpace lexer
 opTable :: OperatorTable String () Identity Expr
 opTable =
     [
-        [ Infix (EOp OAdd <$ reservedOp "+") AssocLeft
-        , Infix (EOp OSub <$ reservedOp "-") AssocLeft
+        [ Infix (EOp OAdd <$ (continued *> reservedOp "+")) AssocLeft
+        , Infix (EOp OSub <$ (continued *> reservedOp "-")) AssocLeft
         ]
     ]
 
@@ -71,9 +75,18 @@ opTable =
 parseExpr :: Parser Expr
 parseExpr = buildExpressionParser opTable parseApp
 
+{- | succeeds only if the next token is not at the start of a line;
+a token in column 1 begins a new top-level item, so an expression can only
+continue onto the next line if that line is indented (a simplified offside rule)
+-}
+continued :: Parser ()
+continued = do
+    col <- sourceColumn <$> getPosition
+    if col > 1 then return () else parserZero
+
 -- | application is left-associative: f x y = (f x) y
 parseApp :: Parser Expr
-parseApp = foldl1 EApp <$> many1 parseAtom
+parseApp = foldl1 EApp <$> ((:) <$> parseAtom <*> many (continued *> parseAtom))
 
 parseAtom :: Parser Expr
 parseAtom =
@@ -138,3 +151,36 @@ parseTypeAtom = parens parseType <|> (concrete =<< identifier) <?> "type"
         "bool" -> return $ T CBool
         "str" -> return $ T CStr
         _ -> unexpected $ "type name " ++ show name
+
+{- | a top-level let is a function definition, a value definition, or,
+if followed by @in@, an ordinary let expression
+-}
+parseTopLet :: Parser TopExpr
+parseTopLet = do
+    name <- reserved "let" *> parseId
+    parseTopFun name <|> parseTopValue name
+
+parseTopValue :: Name -> Parser TopExpr
+parseTopValue name = do
+    bind <- Bind name <$> optionMaybe (reservedOp ":" *> parseType)
+    val <- reservedOp "=" *> parseExpr
+    -- if val is followed by @in@, parse the body of the let
+    option (TELet bind val) (TEExpr . ELet bind val <$> (reserved "in" *> parseExpr))
+
+parseTopFun :: Name -> Parser TopExpr
+parseTopFun name =
+    returnTypeLast
+        <$> parens (sepBy parseBinding (reservedOp ","))
+        <*> optionMaybe (reservedOp ":" *> parseType)
+        <*> (reservedOp "=" *> parseExpr)
+  where
+    returnTypeLast params rett = TEFun (Bind name rett) params
+
+parseTopExpr :: Parser TopExpr
+parseTopExpr = parseTopLet <|> (TEExpr <$> parseExpr)
+
+runParseTopExprs :: String -> Either String [TopExpr]
+runParseTopExprs input =
+    case parse (whiteSpace *> many1 parseTopExpr <* eof) "input" input of
+        Left err -> Left $ show err
+        Right exprs -> Right exprs

@@ -5,20 +5,15 @@ module Hmmm.Syntax (
     Operator (..),
     Literal (..),
     Binding (..),
+    TopExpr (..),
 ) where
 
--- import Data.List
+import Data.List
 import Hmmm.Types
 
 type Name = String
 
 data Binding = Bind Name (Maybe Type) deriving (Eq)
-
--- data Type
---     = TInt
---     | TBool
---     | TStr
---     | TFun Type Type
 
 data Expr
     = EVar Name
@@ -60,7 +55,8 @@ data Literal
     | LStr String
     deriving (Show, Eq)
 
--- data TopExpr
---     = TEFun Binding (List Binding) Expr
---     | TELet Binding Expr
---     | TEExpr Expr
+data TopExpr
+    = TEFun Binding (List Binding) Expr
+    | TELet Binding Expr
+    | TEExpr Expr
+    deriving (Show, Eq)

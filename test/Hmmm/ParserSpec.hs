@@ -13,6 +13,13 @@ parsesTo input expected = runParse input @?= Right expected
 rejects :: String -> Assertion
 rejects input = assertLeft ("parsing " ++ show input ++ " should fail") (runParse input)
 
+-- | parse a whole program of top-level items
+programIs :: String -> [TopExpr] -> Assertion
+programIs input expected = runParseTopExprs input @?= Right expected
+
+rejectsProgram :: String -> Assertion
+rejectsProgram input = assertLeft ("parsing program " ++ show input ++ " should fail") (runParseTopExprs input)
+
 int :: Integer -> Expr
 int = ELit . LInt
 
@@ -26,6 +33,7 @@ b n = Bind n Nothing
 -- | an annotated binding
 (.:) :: Name -> Type -> Binding
 n .: t = Bind n (Just t)
+
 infix 4 .:
 
 tInt, tBool, tStr :: Type
@@ -164,5 +172,49 @@ parserTests =
             , testCase "unparenthesized annotated lambda fails" $ rejects "\\x: int -> x"
             , testCase "type names are still valid variables" $
                 "int bool" `parsesTo` EApp (v "int") (v "bool")
+            ]
+        , testGroup
+            "Top level"
+            [ testCase "example program" $
+                "let foo (a: int): int = a + 1\nlet g = 9\nfoo g"
+                    `programIs` [ TEFun ("foo" .: tInt) ["a" .: tInt] (EOp OAdd (v "a") (int 1))
+                                , TELet (b "g") (int 9)
+                                , TEExpr (EApp (v "foo") (v "g"))
+                                ]
+            , testCase "value definition" $ "let g = 9" `programIs` [TELet (b "g") (int 9)]
+            , testCase "annotated value definition" $
+                "let g: int = 9" `programIs` [TELet ("g" .: tInt) (int 9)]
+            , testCase "function without a return type" $
+                "let f (x) = x" `programIs` [TEFun (b "f") [b "x"] (v "x")]
+            , testCase "function with several parameters" $
+                "let f (x: int, y) = x"
+                    `programIs` [TEFun (b "f") ["x" .: tInt, b "y"] (v "x")]
+            , testCase "function with a function return type" $
+                "let f (x: int): int -> int = \\y -> x"
+                    `programIs` [TEFun ("f" .: tInt ~> tInt) ["x" .: tInt] (EAbs (b "y") (v "x"))]
+            , testCase "a new line starts a new item" $
+                "f x\ng y"
+                    `programIs` [TEExpr (EApp (v "f") (v "x")), TEExpr (EApp (v "g") (v "y"))]
+            , testCase "an indented line continues the item" $
+                "f x\n  y" `programIs` [TEExpr (EApp (EApp (v "f") (v "x")) (v "y"))]
+            , testCase "an indented operator continues the item" $
+                "let a = 1\n  + 2" `programIs` [TELet (b "a") (EOp OAdd (int 1) (int 2))]
+            , testCase "a line starting with an operator is not a continuation" $
+                rejectsProgram "let a = 1\n+ 2"
+            , testCase "top-level let ... in is an expression" $
+                "let x = 1 in x" `programIs` [TEExpr (ELet (b "x") (int 1) (v "x"))]
+            , testCase "let ... in followed by another item" $
+                "let x = 1 in x\nlet y = 2"
+                    `programIs` [TEExpr (ELet (b "x") (int 1) (v "x")), TELet (b "y") (int 2)]
+            , testCase "blank lines and surrounding whitespace" $
+                "\nlet g = 9\n\n\nfoo g\n"
+                    `programIs` [TELet (b "g") (int 9), TEExpr (EApp (v "foo") (v "g"))]
+            , testCase "a let expression nested in a definition" $
+                "let f (x) = let y = x in y\nf 1"
+                    `programIs` [ TEFun (b "f") [b "x"] (ELet (b "y") (v "x") (v "y"))
+                                , TEExpr (EApp (v "f") (int 1))
+                                ]
+            , testCase "two items on one line fail" $ rejectsProgram "let g = 9 let h = 1"
+            , testCase "empty program fails" $ rejectsProgram ""
             ]
         ]
