@@ -32,7 +32,7 @@ State:  count of bound type variables
 type Infer t = RWST Context [Constraint] FreeVarCount (Except String) t
 
 -- | universal closure over Type t
-generalize :: Context -> Type -> Polytype
+generalize :: Context -> TypeMaybe -> Polytype
 generalize ctx t = ForAll vs t
   where
     ctxvs = freeTypeVars $ M.elems ctx
@@ -43,7 +43,7 @@ generalize ctx t = ForAll vs t
 eg. ForAll a, a -> a => t0 -> t0
 which could then become Int -> Int
 -}
-instantiate :: Polytype -> Infer Type
+instantiate :: Polytype -> Infer TypeMaybe
 instantiate (ForAll qvs t) = do
     let qvsl = S.toList qvs
     ftvs <- traverse (const fresh) qvsl
@@ -51,18 +51,21 @@ instantiate (ForAll qvs t) = do
     return $ applySubst subst t
 
 -- | create a new inference with constraint a=b
-constrain :: Type -> Type -> Infer ()
+constrain :: TypeMaybe -> TypeMaybe -> Infer ()
 constrain a b = tell [Constraint a b]
 
 -- | get a new, free type variable
-fresh :: Infer Type
+fresh :: Infer TypeMaybe
 fresh = do
     count <- get
     modify (+ 1)
     return . TVar . TV $ show count
 
+tfun :: TypeMaybe -> TypeMaybe -> TypeMaybe
+tfun a b = TCon $ TCFun a b
+
 -- | infer the type of an expression
-infer :: Expr -> Infer Type
+infer :: Expr -> Infer TypeMaybe
 infer = \case
     ELit l -> return $ TLit $ case l of
         LInt _ -> CInt
@@ -85,7 +88,7 @@ infer = \case
         paramt <- fresh
         let paramt' = ForAll S.empty paramt
         bodyt <- local (M.insert param paramt') (infer body)
-        return $ TFun paramt bodyt
+        return $ tfun paramt bodyt
     ELet vid val body -> do
         (valt, cs) <- listen (infer val)
         s <- either throwError return $ runSolve cs
@@ -97,26 +100,26 @@ infer = \case
         funt <- infer fun
         argt <- infer arg
         rett <- fresh
-        constrain funt $ TFun argt rett
+        constrain funt $ tfun argt rett
         return rett
     EOp op a b -> do
         let opt =
                 ( let int = TLit CInt
                    in case op of
-                        OAdd -> TFun int $ TFun int int
-                        OSub -> TFun int $ TFun int int
+                        OAdd -> tfun int $ tfun int int
+                        OSub -> tfun int $ tfun int int
                 )
         at <- infer a
         bt <- infer b
         rett <- fresh
-        constrain opt $ TFun at $ TFun bt rett
+        constrain opt $ tfun at $ tfun bt rett
         return rett
 
-runInfer :: Expr -> Either String (Type, FreeVarCount, [Constraint])
+runInfer :: Expr -> Either String (TypeMaybe, FreeVarCount, [Constraint])
 runInfer i = runIdentity $ runExceptT $ runRWST (infer i) M.empty 0
 
 -- | infer the constraints of an expression, solve them, and return its type
-typeOf :: Expr -> Either String Type
+typeOf :: Expr -> Either String TypeMaybe
 typeOf e = do
     (t, _, cs) <- runInfer e
     s <- runSolve cs

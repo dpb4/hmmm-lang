@@ -64,7 +64,7 @@ endToEndTests =
             assertLeft "should fail" (typeOf (EOp OSub (ELit (LInt 1)) (ELit (LStr "s"))))
         , testCase "identity function has type a -> a" $
             case typeOf (EAbs "x" (EVar "x")) of
-                Right (TFun (TVar a) (TVar b)) -> a @?= b
+                Right (TCon (TCFun (TVar a) (TVar b))) -> a @?= b
                 other -> assertFailure $ "expected a -> a, got " ++ show other
         , testCase "lambda using addition is Int -> Int" $
             typeOf (EAbs "x" (EOp OAdd (EVar "x") (ELit (LInt 1)))) @?= Right (int ~> int)

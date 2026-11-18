@@ -8,7 +8,7 @@ import Hmmm.Unify
 import Test.Tasty
 import Test.Tasty.HUnit
 
-runUnify :: Type -> Type -> Either String Subst
+runUnify :: TypeMaybe -> TypeMaybe -> Either String Subst
 runUnify a b = runExcept (unify a b)
 
 unifyTests :: TestTree

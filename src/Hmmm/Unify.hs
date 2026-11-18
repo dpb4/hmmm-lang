@@ -12,17 +12,22 @@ import Hmmm.Types
 
 type Solve a = Except String a
 
-unify :: Type -> Type -> Solve Subst
+unify :: TypeMaybe -> TypeMaybe -> Solve Subst
 unify a b | a == b = return M.empty
 unify (TVar v) t = bind v t
 unify t (TVar v) = bind v t
-unify (TFun in1 out1) (TFun in2 out2) = do
-    ins <- unify in1 in2
-    outs <- unify (applySubst ins out1) (applySubst ins out2)
-    return $ compose outs ins
+unify (TCon t1) (TCon t2) = case (t1, t2) of
+    ((TCFun in1 out1), (TCFun in2 out2)) -> do
+        ins <- unify in1 in2
+        outs <- unify (applySubst ins out1) (applySubst ins out2)
+        return $ compose outs ins
+-- unify (TFun in1 out1) (TFun in2 out2) = do
+--     ins <- unify in1 in2
+--     outs <- unify (applySubst ins out1) (applySubst ins out2)
+--     return $ compose outs ins
 unify x y = throwError $ "Misc type mismatch " ++ show x ++ " and " ++ show y
 
-bind :: TypeVar -> Type -> Solve Subst
+bind :: TypeVar -> TypeMaybe -> Solve Subst
 bind v t
     | S.member v $ freeTypeVars t = throwError $ "Infinite type " ++ show v ++ " ~ " ++ show t -- Occurs check
     | otherwise = return $ M.singleton v t

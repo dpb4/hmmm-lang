@@ -1,8 +1,12 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 -- | type representations and substitutions, shared by inference and unification
 module Hmmm.Types (
     ConcreteType (..),
     TypeVar (..),
-    Type (..),
+    TypeMaybe (..),
+    TypeConstructor (..),
+    TypeKnown (..),
     Polytype (..),
     Constraint (..),
     Subst,
@@ -15,6 +19,19 @@ import qualified Data.Set as S
 import Hmmm.Syntax (Name)
 
 data ConcreteType = CInt | CBool | CStr deriving (Eq)
+
+data TypeConstructor t = TCFun t t deriving (Eq, Show)
+
+--                     | List t
+
+data TypeKnown
+    = T ConcreteType
+    | TC (TypeConstructor TypeKnown)
+
+-- data TypeMaybe
+--     = TVar TypeVar
+--     | TLit ConcreteType
+--     | TC (TypeConstructor TypeMaybe)
 
 instance Show ConcreteType where
     show CInt = "Int"
@@ -31,24 +48,28 @@ TLit ConcreteType - a known primitive type
 TVar TypeVar      - an unknown type
 TFun Type Type    - a function with signature Type -> Type
 -}
-data Type
+data TypeMaybe
     = TLit ConcreteType
     | TVar TypeVar
-    | TFun Type Type
+    | TCon (TypeConstructor TypeMaybe)
     deriving (Eq)
 
-instance Show Type where
+pattern a :-> b = TCFun a b
+
+-- pattern [a] = TCList a
+
+instance Show TypeMaybe where
     show (TLit ct) = show ct
     show (TVar tv) = show tv
-    show (TFun a b) = show a ++ " -> " ++ show b
+    show (TCon t) = show t
 
 -- | a Polytype is a type with 0 or more universally quantified Type variables
-data Polytype = ForAll (S.Set TypeVar) Type
+data Polytype = ForAll (S.Set TypeVar) TypeMaybe
 
 instance Show Polytype where
     show (ForAll qvs t) = "∀ " ++ show qvs ++ ", " ++ show t
 
-data Constraint = Constraint Type Type
+data Constraint = Constraint TypeMaybe TypeMaybe
 
 instance Show Constraint where
     show (Constraint a b) = show a ++ " c= " ++ show b
@@ -56,29 +77,35 @@ instance Show Constraint where
 {- | a map of type vars to actual assigned types
 this can be applied to any Substitutable
 -}
-type Subst = M.Map TypeVar Type
+type Subst = M.Map TypeVar TypeMaybe
 
 -- | an object to which substitutions can be applied, and which may have free type variables
 class Substitutable a where
     applySubst :: Subst -> a -> a
     freeTypeVars :: a -> S.Set TypeVar
 
-instance Substitutable Type where
+instance (Substitutable t) => Substitutable (TypeConstructor t) where
     applySubst s t = case t of
-        l@(TLit _) -> l
-        tv@(TVar v) -> M.findWithDefault tv v s
-        TFun i o -> TFun i' o'
+        TCFun i o -> TCFun i' o'
           where
             i' = (applySubst s i)
             o' = (applySubst s o)
+    freeTypeVars t = case t of
+        TCFun i o -> S.union i' o'
+          where
+            i' = (freeTypeVars i)
+            o' = (freeTypeVars o)
+
+instance Substitutable TypeMaybe where
+    applySubst s t = case t of
+        l@(TLit _) -> l
+        tv@(TVar v) -> M.findWithDefault tv v s
+        TCon tc -> TCon $ applySubst s tc
 
     freeTypeVars t = case t of
         TLit _ -> S.empty
         TVar v -> S.singleton v
-        TFun i o -> S.union i' o'
-          where
-            i' = (freeTypeVars i)
-            o' = (freeTypeVars o)
+        TCon tc -> freeTypeVars tc
 
 instance Substitutable Polytype where
     applySubst s (ForAll qvs t) = ForAll qvs $ applySubst unquantified t

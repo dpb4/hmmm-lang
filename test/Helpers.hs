@@ -17,16 +17,16 @@ import Test.Tasty.HUnit
 tv :: Name -> TypeVar
 tv = TV
 
-var :: Name -> Type
+var :: Name -> TypeMaybe
 var = TVar . tv
 
-int, bool, str :: Type
+int, bool, str :: TypeMaybe
 int = TLit CInt
 bool = TLit CBool
 str = TLit CStr
 
-(~>) :: Type -> Type -> Type
-(~>) = TFun
+(~>) :: TypeMaybe -> TypeMaybe -> TypeMaybe
+(~>) a b = TCon $ TCFun a b
 infixr 5 ~>
 
 assertLeft :: (Show b) => String -> Either a b -> Assertion
