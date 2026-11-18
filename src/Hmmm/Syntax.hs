@@ -4,15 +4,27 @@ module Hmmm.Syntax (
     Expr (..),
     Operator (..),
     Literal (..),
+    Binding (..),
 ) where
 
+-- import Data.List
+import Hmmm.Types
+
 type Name = String
+
+data Binding = Bind Name (Maybe Type) deriving (Eq)
+
+-- data Type
+--     = TInt
+--     | TBool
+--     | TStr
+--     | TFun Type Type
 
 data Expr
     = EVar Name
     | EIf Expr Expr Expr
-    | EAbs Name Expr
-    | ELet Name Expr Expr
+    | EAbs Binding Expr
+    | ELet Binding Expr Expr
     | EApp Expr Expr
     | EOp Operator Expr Expr
     | ELit Literal
@@ -26,6 +38,10 @@ data Operator
 instance Show Operator where
     show OAdd = "+"
     show OSub = "-"
+
+instance Show Binding where
+    show (Bind n (Just t)) = n ++ ": " ++ show t
+    show (Bind n (Nothing)) = n
 
 instance Show Expr where
     show e = case e of
@@ -43,3 +59,8 @@ data Literal
     | LBool Bool
     | LStr String
     deriving (Show, Eq)
+
+-- data TopExpr
+--     = TEFun Binding (List Binding) Expr
+--     | TELet Binding Expr
+--     | TEExpr Expr

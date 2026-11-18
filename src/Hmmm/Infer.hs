@@ -64,6 +64,13 @@ fresh = do
 tfun :: TypeMaybe -> TypeMaybe -> TypeMaybe
 tfun a b = TCon $ TCFun a b
 
+inferBinding :: Binding -> Infer (Name, TypeMaybe)
+inferBinding (Bind n mt) = case mt of
+    Just t -> return $ (n, typeToMaybe t)
+    Nothing -> do
+        t <- fresh
+        return (n, t)
+
 -- | infer the type of an expression
 infer :: Expr -> Infer TypeMaybe
 infer = \case
@@ -84,13 +91,18 @@ infer = \case
         constrain condT $ TLit CBool
         constrain tCaseT fCaseT
         return tCaseT
-    EAbs param body -> do
-        paramt <- fresh
+    EAbs bind body -> do
+        (param, paramt) <- inferBinding bind
         let paramt' = ForAll S.empty paramt
         bodyt <- local (M.insert param paramt') (infer body)
         return $ tfun paramt bodyt
-    ELet vid val body -> do
-        (valt, cs) <- listen (infer val)
+    ELet bind val body -> do
+        (vid, vidt) <- inferBinding bind
+        -- the annotation must be solved with val's constraints, before generalizing
+        (valt, cs) <- listen $ do
+            t <- infer val
+            constrain vidt t
+            return t
         s <- either throwError return $ runSolve cs
         ctx <- asks (applySubst s)
         let valtg = generalize ctx (applySubst s valt)

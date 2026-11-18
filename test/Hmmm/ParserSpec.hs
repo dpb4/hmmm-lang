@@ -3,6 +3,7 @@ module Hmmm.ParserSpec (parserTests) where
 import Helpers (assertLeft)
 import Hmmm.Parser
 import Hmmm.Syntax
+import Hmmm.Types
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -17,6 +18,24 @@ int = ELit . LInt
 
 v :: Name -> Expr
 v = EVar
+
+-- | an unannotated binding
+b :: Name -> Binding
+b n = Bind n Nothing
+
+-- | an annotated binding
+(.:) :: Name -> Type -> Binding
+n .: t = Bind n (Just t)
+infix 4 .:
+
+tInt, tBool, tStr :: Type
+tInt = T CInt
+tBool = T CBool
+tStr = T CStr
+
+(~>) :: Type -> Type -> Type
+a ~> r = TC (TCFun a r)
+infixr 5 ~>
 
 parserTests :: TestTree
 parserTests =
@@ -51,7 +70,7 @@ parserTests =
         , testGroup
             "Whitespace"
             [ testCase "leading and trailing whitespace" $ "  x  " `parsesTo` v "x"
-            , testCase "newlines" $ "let x = 1\nin x" `parsesTo` ELet "x" (int 1) (v "x")
+            , testCase "newlines" $ "let x = 1\nin x" `parsesTo` ELet (b "x") (int 1) (v "x")
             , testCase "no whitespace around operators" $ "1+2" `parsesTo` EOp OAdd (int 1) (int 2)
             , testCase "empty input fails" $ rejects ""
             , testCase "trailing garbage fails" $ rejects "1 )"
@@ -95,32 +114,55 @@ parserTests =
             ]
         , testGroup
             "Let"
-            [ testCase "simple" $ "let x = 1 in x" `parsesTo` ELet "x" (int 1) (v "x")
+            [ testCase "simple" $ "let x = 1 in x" `parsesTo` ELet (b "x") (int 1) (v "x")
             , testCase "operator in value and body" $
                 "let x = 1 + 2 in x - 1"
-                    `parsesTo` ELet "x" (EOp OAdd (int 1) (int 2)) (EOp OSub (v "x") (int 1))
+                    `parsesTo` ELet (b "x") (EOp OAdd (int 1) (int 2)) (EOp OSub (v "x") (int 1))
             , testCase "nested" $
                 "let x = 1 in let y = 2 in x"
-                    `parsesTo` ELet "x" (int 1) (ELet "y" (int 2) (v "x"))
+                    `parsesTo` ELet (b "x") (int 1) (ELet (b "y") (int 2) (v "x"))
             , testCase "let-bound function" $
                 "let id = \\x -> x in id 1"
-                    `parsesTo` ELet "id" (EAbs "x" (v "x")) (EApp (v "id") (int 1))
+                    `parsesTo` ELet (b "id") (EAbs (b "x") (v "x")) (EApp (v "id") (int 1))
             , testCase "keyword as binding name fails" $ rejects "let in = 1 in 2"
             ]
         , testGroup
             "Lambda"
-            [ testCase "backslash" $ "\\x -> x" `parsesTo` EAbs "x" (v "x")
-            , testCase "lambda symbol" $ "λx -> x" `parsesTo` EAbs "x" (v "x")
-            , testCase "spaces after the backslash" $ "\\ x -> x" `parsesTo` EAbs "x" (v "x")
+            [ testCase "backslash" $ "\\x -> x" `parsesTo` EAbs (b "x") (v "x")
+            , testCase "lambda symbol" $ "λx -> x" `parsesTo` EAbs (b "x") (v "x")
+            , testCase "spaces after the backslash" $ "\\ x -> x" `parsesTo` EAbs (b "x") (v "x")
             , testCase "body extends to the right" $
-                "\\x -> x + 1" `parsesTo` EAbs "x" (EOp OAdd (v "x") (int 1))
+                "\\x -> x + 1" `parsesTo` EAbs (b "x") (EOp OAdd (v "x") (int 1))
             , testCase "curried" $
-                "\\x -> \\y -> x" `parsesTo` EAbs "x" (EAbs "y" (v "x"))
+                "\\x -> \\y -> x" `parsesTo` EAbs (b "x") (EAbs (b "y") (v "x"))
             , testCase "arrow is not minus" $
-                "\\x -> x - 1" `parsesTo` EAbs "x" (EOp OSub (v "x") (int 1))
+                "\\x -> x - 1" `parsesTo` EAbs (b "x") (EOp OSub (v "x") (int 1))
             , testCase "applied lambda" $
-                "(\\x -> x) 1" `parsesTo` EApp (EAbs "x" (v "x")) (int 1)
+                "(\\x -> x) 1" `parsesTo` EApp (EAbs (b "x") (v "x")) (int 1)
             , testCase "variable named f" $
-                "\\f -> f 1" `parsesTo` EAbs "f" (EApp (v "f") (int 1))
+                "\\f -> f 1" `parsesTo` EAbs (b "f") (EApp (v "f") (int 1))
+            ]
+        , testGroup
+            "Type annotations"
+            [ testCase "let with a concrete type" $
+                "let a: int = 1 in a" `parsesTo` ELet ("a" .: tInt) (int 1) (v "a")
+            , testCase "let with a function type" $
+                "let f: bool -> str = \\x -> \"s\" in f"
+                    `parsesTo` ELet ("f" .: tBool ~> tStr) (EAbs (b "x") (ELit (LStr "s"))) (v "f")
+            , testCase "function types are right-associative" $
+                "let f: int -> int -> int = g in f"
+                    `parsesTo` ELet ("f" .: tInt ~> (tInt ~> tInt)) (v "g") (v "f")
+            , testCase "parenthesized function argument type" $
+                "let f: (int -> int) -> int = g in f"
+                    `parsesTo` ELet ("f" .: (tInt ~> tInt) ~> tInt) (v "g") (v "f")
+            , testCase "no spaces around the colon" $
+                "let a:int = 1 in a" `parsesTo` ELet ("a" .: tInt) (int 1) (v "a")
+            , testCase "annotated lambda parameter" $
+                "\\(x: int) -> x" `parsesTo` EAbs ("x" .: tInt) (v "x")
+            , testCase "unknown type name fails" $ rejects "let a: float = 1 in a"
+            , testCase "missing type fails" $ rejects "let a: = 1 in a"
+            , testCase "unparenthesized annotated lambda fails" $ rejects "\\x: int -> x"
+            , testCase "type names are still valid variables" $
+                "int bool" `parsesTo` EApp (v "int") (v "bool")
             ]
         ]

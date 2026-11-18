@@ -6,27 +6,35 @@ module Hmmm.Types (
     TypeVar (..),
     TypeMaybe (..),
     TypeConstructor (..),
-    TypeKnown (..),
+    Type (..),
     Polytype (..),
     Constraint (..),
     Subst,
     Substitutable (..),
     compose,
+    typeToMaybe,
 ) where
 
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Hmmm.Syntax (Name)
 
 data ConcreteType = CInt | CBool | CStr deriving (Eq)
 
-data TypeConstructor t = TCFun t t deriving (Eq, Show)
+data TypeConstructor t = TCFun t t deriving (Eq)
+
+instance (Show t) => Show (TypeConstructor t) where
+    show (TCFun a b) = show a ++ " -> " ++ show b
 
 --                     | List t
 
-data TypeKnown
+data Type
     = T ConcreteType
-    | TC (TypeConstructor TypeKnown)
+    | TC (TypeConstructor Type)
+    deriving (Eq)
+
+instance Show Type where
+    show (T c) = show c
+    show (TC t) = show t
 
 -- data TypeMaybe
 --     = TVar TypeVar
@@ -38,7 +46,7 @@ instance Show ConcreteType where
     show CBool = "Bool"
     show CStr = "Str"
 
-newtype TypeVar = TV Name deriving (Eq, Ord)
+newtype TypeVar = TV String deriving (Eq, Ord)
 
 instance Show TypeVar where
     show (TV n) = "t" ++ n
@@ -134,3 +142,7 @@ instance (Substitutable a) => Substitutable (M.Map k a) where
 -- | compose s1 s2 applies s2 first, then s1
 compose :: Subst -> Subst -> Subst
 compose s1 s2 = M.map (applySubst s1) s2 `M.union` s1
+
+typeToMaybe :: Type -> TypeMaybe
+typeToMaybe (T t) = TLit t
+typeToMaybe (TC (TCFun a b)) = TCon $ TCFun (typeToMaybe a) (typeToMaybe b)

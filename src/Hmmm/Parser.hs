@@ -3,14 +3,17 @@ module Hmmm.Parser (
     parseAbs,
     parseApp,
     parseAtom,
+    parseBinding,
     parseExpr,
     parseId,
     parseIf,
     parseLet,
     parseLit,
+    parseType,
 ) where
 
 import Hmmm.Syntax
+import Hmmm.Types
 
 import Data.Char (isLetter)
 import Data.Functor.Identity
@@ -28,8 +31,8 @@ runParse input =
         Left err -> Left $ show err
         Right expr -> Right expr
 
-{- | every token parser built from the lexer consumes the whitespace after it,
-so no other parser needs to deal with whitespace
+{- | every token parser consumes the whitespace after,
+SO NO OTHER PARSER needs to deal with whitespace
 -}
 lexer :: Tok.TokenParser ()
 lexer =
@@ -38,7 +41,7 @@ lexer =
             { Tok.identStart = satisfy (\c -> isLetter c && c /= 'λ')
             , Tok.identLetter = alphaNum
             , Tok.reservedNames = ["if", "then", "else", "let", "in", "true", "false"]
-            , Tok.reservedOpNames = ["+", "-", "->", "=", "\\", "λ"]
+            , Tok.reservedOpNames = ["+", "-", "->", "=", ":", "\\", "λ"]
             }
 
 identifier :: Parser String
@@ -92,16 +95,21 @@ parseIf =
         <*> (reserved "then" *> parseExpr)
         <*> (reserved "else" *> parseExpr)
 
+{- | an annotated lambda parameter needs parentheses;
+@λx: int -> x@ is ambiguous, the arrow could belong to the type or the lambda
+-}
 parseAbs :: Parser Expr
 parseAbs =
     EAbs
-        <$> ((reservedOp "\\" <|> reservedOp "λ") *> parseId)
+        <$> ((reservedOp "\\" <|> reservedOp "λ") *> (parens parseBinding <|> unannotated))
         <*> (reservedOp "->" *> parseExpr)
+  where
+    unannotated = (`Bind` Nothing) <$> parseId
 
 parseLet :: Parser Expr
 parseLet =
     ELet
-        <$> (reserved "let" *> parseId)
+        <$> (reserved "let" *> parseBinding)
         <*> (reservedOp "=" *> parseExpr)
         <*> (reserved "in" *> parseExpr)
 
@@ -113,3 +121,20 @@ parseLit =
                 <|> (LBool False <$ reserved "false")
                 <|> (LStr <$> Tok.stringLiteral lexer)
             )
+
+-- | a name with an optional type annotation: @x@ or @x: T@
+parseBinding :: Parser Binding
+parseBinding = Bind <$> parseId <*> optionMaybe (reservedOp ":" *> parseType)
+
+-- | function types are right-associative: int -> int -> int = int -> (int -> int)
+parseType :: Parser Type
+parseType = foldr1 (\a b -> TC (TCFun a b)) <$> sepBy1 parseTypeAtom (reservedOp "->")
+
+parseTypeAtom :: Parser Type
+parseTypeAtom = parens parseType <|> (concrete =<< identifier) <?> "type"
+  where
+    concrete name = case name of
+        "int" -> return $ T CInt
+        "bool" -> return $ T CBool
+        "str" -> return $ T CStr
+        _ -> unexpected $ "type name " ++ show name

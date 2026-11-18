@@ -52,11 +52,11 @@ evalIf cond a b =
         VBool False -> eval b
         v -> throwError ("if condition must be a bool (got " ++ show v ++ ")")
 
-evalAbs :: Name -> Expr -> Eval Value
-evalAbs param body = asks (\env -> VClosure env param body)
+evalAbs :: Binding -> Expr -> Eval Value
+evalAbs (Bind param _) body = asks (\env -> VClosure env param body)
 
-evalLet :: Name -> Expr -> Expr -> Eval Value
-evalLet vid expr body = do
+evalLet :: Binding -> Expr -> Expr -> Eval Value
+evalLet (Bind vid _) expr body = do
     v <- eval expr
     local (M.insert vid v) (eval body)
 
