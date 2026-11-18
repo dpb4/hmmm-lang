@@ -1,12 +1,14 @@
 module Main (main) where
 
-import qualified Hmmm.Infer ()
+import Hmmm.Eval
 import Hmmm.Parser
-import Hmmm.Syntax (Expr)
-
-print' :: Either String Expr -> IO ()
-print' (Left err) = putStrLn err
-print' (Right expr) = print expr
 
 main :: IO ()
-main = getLine >>= print' . runParse >> main
+main = do
+    line <- getLine
+    case runParse line of
+        Left err -> putStrLn $ "parse error:\n" ++ err
+        Right expr -> case runEval expr of
+            Left err -> putStrLn $ "runtime error:\n" ++ err
+            Right v -> putStrLn ("-> " ++ show v)
+    main
