@@ -45,7 +45,7 @@ instance Show Binding where
 
 instance Show Expr where
     show e = case e of
-        EVar n -> show n
+        EVar n -> n
         EIf c a b -> "if " ++ show c ++ " then " ++ show a ++ " else " ++ show b
         EAbs p b -> "λ" ++ show p ++ " -> " ++ show b
         ELet i v b -> "let " ++ show i ++ " = " ++ show v ++ " in " ++ show b
