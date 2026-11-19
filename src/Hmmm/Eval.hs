@@ -86,14 +86,82 @@ evalApp fune arge = do
 
 evalOp :: Operator -> Expr -> Expr -> Eval Value
 evalOp o ae be = do
-    a <- eval ae
-    b <- eval be
-    case (a, b) of
-        (VInt ai, VInt bi) -> return $ case o of
-            OAdd -> VInt $ ai + bi
-            OSub -> VInt $ ai - bi
-        -- TODO split op then type for better error messages
-        _ -> throwError "expected two integers"
+    ( case o of
+            OAnd -> evalOpAnd ae be
+            OOr -> evalOpOr ae be
+            _ -> do
+                a <- eval ae
+                b <- eval be
+                case o of
+                    OAdd -> evalOpAdd a b
+                    OSub -> evalOpSub a b
+                    OEq -> evalOpEq a b
+                    ONeq -> evalOpNeq a b
+                    OGt -> evalOpGt a b
+                    OGeq -> evalOpGeq a b
+                    OLt -> evalOpLt a b
+                    OLeq -> evalOpLeq a b
+        )
+
+evalOpAdd :: Value -> Value -> Eval Value
+evalOpAdd (VInt a) (VInt b) = return $ VInt (a + b)
+evalOpAdd x y = throwError ("(+) requires two integers (got " ++ show x ++ ", " ++ show y ++ ")")
+
+evalOpSub :: Value -> Value -> Eval Value
+evalOpSub (VInt a) (VInt b) = return $ VInt (a - b)
+evalOpSub x y = throwError ("(-) requires two integers (got " ++ show x ++ ", " ++ show y ++ ")")
+
+evalOpEq :: Value -> Value -> Eval Value
+evalOpEq (VInt a) (VInt b) = return $ VBool (a == b)
+evalOpEq (VBool a) (VBool b) = return $ VBool (a == b)
+evalOpEq (VStr a) (VStr b) = return $ VBool (a == b)
+evalOpEq _ _ = return $ VBool False
+
+evalOpNeq :: Value -> Value -> Eval Value
+evalOpNeq (VInt a) (VInt b) = return $ VBool (a /= b)
+evalOpNeq (VBool a) (VBool b) = return $ VBool (a /= b)
+evalOpNeq (VStr a) (VStr b) = return $ VBool (a /= b)
+evalOpNeq _ _ = return $ VBool True
+
+evalOpGt :: Value -> Value -> Eval Value
+evalOpGt (VInt a) (VInt b) = return $ VBool (a > b)
+evalOpGt x y = throwError ("(>) requires two integers (got " ++ show x ++ ", " ++ show y ++ ")")
+
+evalOpGeq :: Value -> Value -> Eval Value
+evalOpGeq (VInt a) (VInt b) = return $ VBool (a >= b)
+evalOpGeq x y = throwError ("(>=) requires two integers (got " ++ show x ++ ", " ++ show y ++ ")")
+
+evalOpLt :: Value -> Value -> Eval Value
+evalOpLt (VInt a) (VInt b) = return $ VBool (a < b)
+evalOpLt x y = throwError ("(<) requires two integers (got " ++ show x ++ ", " ++ show y ++ ")")
+
+evalOpLeq :: Value -> Value -> Eval Value
+evalOpLeq (VInt a) (VInt b) = return $ VBool (a <= b)
+evalOpLeq x y = throwError ("(<=) requires two integers (got " ++ show x ++ ", " ++ show y ++ ")")
+
+evalOpAnd :: Expr -> Expr -> Eval Value
+evalOpAnd a b = do
+    a' <- eval a
+    case a' of
+        VBool True -> do
+            b' <- eval b
+            case b' of
+                VBool _ -> return b'
+                _ -> throwError ("(and) requires bools (got " ++ show b' ++ ")")
+        VBool False -> return a'
+        _ -> throwError ("(and) requires bools (got " ++ show a' ++ ")")
+
+evalOpOr :: Expr -> Expr -> Eval Value
+evalOpOr a b = do
+    a' <- eval a
+    case a' of
+        VBool False -> do
+            b' <- eval b
+            case b' of
+                VBool _ -> return b'
+                _ -> throwError ("(or) requires bools (got " ++ show b' ++ ")")
+        VBool True -> return a'
+        _ -> throwError ("(or) requires bools (got " ++ show a' ++ ")")
 
 evalLit :: Literal -> Eval Value
 evalLit l = return $ case l of

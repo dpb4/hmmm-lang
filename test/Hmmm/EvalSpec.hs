@@ -91,13 +91,99 @@ expressionTests =
         , testCase "arguments do not leak into the caller's scope" $
             -- let x = 1 in (\x -> x) 2 + x
             ELet (plain "x") (lit 1) (add (EApp (lam "x" (v "x")) (lit 2)) (v "x")) `evalsTo` VInt 3
+        , operatorTests
         , testGroup
             "Runtime errors (for programs that skip type checking)"
             [ testCase "unbound variable" $ fails (v "x")
             , testCase "applying a non-function" $ fails (EApp (lit 1) (lit 2))
             , testCase "non-bool if condition" $ fails (EIf (lit 1) (lit 2) (lit 3))
             , testCase "arithmetic on a non-integer" $ fails (add (lit 1) true)
+            , testCase "comparison on non-integers" $
+                mapM_ (\o -> fails (EOp o (str "a") (str "b"))) [OGt, OGeq, OLt, OLeq]
+            , testCase "and/or on non-bools" $
+                mapM_ (\o -> fails (EOp o (lit 1) (lit 0))) [OAnd, OOr]
             ]
+        ]
+
+-- | an expression that fails if it is ever evaluated: 1 2
+bad :: Expr
+bad = EApp (lit 1) (lit 2)
+
+-- | the result of each operator on each pair of operands
+truthTable :: Operator -> [(Expr, Expr, Bool)] -> Assertion
+truthTable o = mapM_ (\(a, b, r) -> EOp o a b `evalsTo` VBool r)
+
+operatorTests :: TestTree
+operatorTests =
+    testGroup
+        "Operators"
+        [ testCase "==" $
+            truthTable
+                OEq
+                [ (lit 1, lit 1, True)
+                , (lit 1, lit 2, False)
+                , (true, true, True)
+                , (true, false, False)
+                , (str "a", str "a", True)
+                , (str "a", str "b", False)
+                ]
+        , testCase "/=" $
+            truthTable
+                ONeq
+                [ (lit 1, lit 1, False)
+                , (lit 1, lit 2, True)
+                , (false, false, False)
+                , (true, false, True)
+                , (str "a", str "a", False)
+                , (str "a", str "b", True)
+                ]
+        , testCase ">" $ truthTable OGt [(lit 2, lit 1, True), (lit 1, lit 1, False), (lit 0, lit 1, False)]
+        , testCase ">=" $ truthTable OGeq [(lit 2, lit 1, True), (lit 1, lit 1, True), (lit 0, lit 1, False)]
+        , testCase "<" $ truthTable OLt [(lit 2, lit 1, False), (lit 1, lit 1, False), (lit 0, lit 1, True)]
+        , testCase "<=" $ truthTable OLeq [(lit 2, lit 1, False), (lit 1, lit 1, True), (lit 0, lit 1, True)]
+        , testCase "and" $
+            truthTable OAnd [(true, true, True), (true, false, False), (false, true, False), (false, false, False)]
+        , testCase "or" $
+            truthTable OOr [(true, true, True), (true, false, True), (false, true, True), (false, false, False)]
+        , testGroup
+            "Short circuiting"
+            [ testCase "false and _ skips the right side" $ EOp OAnd false bad `evalsTo` VBool False
+            , testCase "true or _ skips the right side" $ EOp OOr true bad `evalsTo` VBool True
+            , testCase "true and _ evaluates the right side" $ fails (EOp OAnd true bad)
+            , testCase "false or _ evaluates the right side" $ fails (EOp OOr false bad)
+            , testCase "the left side is always evaluated" $ do
+                fails (EOp OAnd bad false)
+                fails (EOp OOr bad true)
+            , testCase "a skipped right side is not checked to be a bool" $ do
+                EOp OAnd false (lit 1) `evalsTo` VBool False
+                EOp OOr true (lit 1) `evalsTo` VBool True
+            , testCase "an evaluated right side must be a bool" $ do
+                fails (EOp OAnd true (lit 1))
+                fails (EOp OOr false (lit 1))
+            , testCase "short circuiting through nested and/or" $
+                -- false and boom or true and true
+                EOp OOr (EOp OAnd false bad) (EOp OAnd true true) `evalsTo` VBool True
+            , testCase "short circuiting guards a later check" $
+                -- let f = \x -> x /= 0 and 10 - x > 0 in f 0 or f 3
+                ELet
+                    (plain "f")
+                    (lam "x" (EOp OAnd (EOp ONeq (v "x") (lit 0)) (EOp OGt (sub (lit 10) (v "x")) (lit 0))))
+                    (EOp OOr (EApp (v "f") (lit 0)) (EApp (v "f") (lit 3)))
+                    `evalsTo` VBool True
+            ]
+        , testCase "operands are evaluated before comparing" $
+            -- 1 + 2 == 4 - 1
+            EOp OEq (add (lit 1) (lit 2)) (sub (lit 4) (lit 1)) `evalsTo` VBool True
+        , testCase "comparison as an if condition" $
+            -- let x = 5 in if x > 0 and x < 10 then x else 0
+            ELet
+                (plain "x")
+                (lit 5)
+                (EIf (EOp OAnd (EOp OGt (v "x") (lit 0)) (EOp OLt (v "x") (lit 10))) (v "x") (lit 0))
+                `evalsTo` VInt 5
+        , testCase "comparing a function's result" $
+            -- (\x -> x + 1) 1 == 2
+            EOp OEq (EApp (lam "x" (add (v "x") (lit 1))) (lit 1)) (lit 2) `evalsTo` VBool True
         ]
 
 programTests :: TestTree

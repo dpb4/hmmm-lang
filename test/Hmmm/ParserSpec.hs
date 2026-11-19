@@ -92,6 +92,55 @@ parserTests =
             , testCase "parentheses" $
                 "1 - (2 + 3)" `parsesTo` EOp OSub (int 1) (EOp OAdd (int 2) (int 3))
             , testCase "dangling operator fails" $ rejects "1 +"
+            , testCase "equality" $ "1 == 2" `parsesTo` EOp OEq (int 1) (int 2)
+            , testCase "inequality" $ "1 /= 2" `parsesTo` EOp ONeq (int 1) (int 2)
+            , testCase "greater than" $ "1 > 2" `parsesTo` EOp OGt (int 1) (int 2)
+            , testCase "greater than or equal" $ "1 >= 2" `parsesTo` EOp OGeq (int 1) (int 2)
+            , testCase "less than" $ "1 < 2" `parsesTo` EOp OLt (int 1) (int 2)
+            , testCase "less than or equal" $ "1 <= 2" `parsesTo` EOp OLeq (int 1) (int 2)
+            , testCase "and" $ "a and b" `parsesTo` EOp OAnd (v "a") (v "b")
+            , testCase "or" $ "a or b" `parsesTo` EOp OOr (v "a") (v "b")
+            , testCase "multi-character operators without whitespace" $ do
+                "1==2" `parsesTo` EOp OEq (int 1) (int 2)
+                "1<=2" `parsesTo` EOp OLeq (int 1) (int 2)
+                "1>=2" `parsesTo` EOp OGeq (int 1) (int 2)
+            , testCase "= is not ==" $ rejects "1 = 2"
+            , testCase "unknown operator fails" $ rejects "1 ++ 2"
+            , testCase "arithmetic binds tighter than comparison" $
+                "1 + 2 == 3 - 4"
+                    `parsesTo` EOp OEq (EOp OAdd (int 1) (int 2)) (EOp OSub (int 3) (int 4))
+            , testCase "comparison binds tighter than and/or" $
+                "1 < 2 and 3 >= 4"
+                    `parsesTo` EOp OAnd (EOp OLt (int 1) (int 2)) (EOp OGeq (int 3) (int 4))
+            , testCase "application binds tighter than comparison" $
+                "f x == g y" `parsesTo` EOp OEq (EApp (v "f") (v "x")) (EApp (v "g") (v "y"))
+            , testCase "and binds tighter than or" $ do
+                "a and b or c" `parsesTo` EOp OOr (EOp OAnd (v "a") (v "b")) (v "c")
+                "a or b and c" `parsesTo` EOp OOr (v "a") (EOp OAnd (v "b") (v "c"))
+                "a and b or c and d"
+                    `parsesTo` EOp OOr (EOp OAnd (v "a") (v "b")) (EOp OAnd (v "c") (v "d"))
+            , testCase "and/or are left associative" $ do
+                "a and b and c" `parsesTo` EOp OAnd (EOp OAnd (v "a") (v "b")) (v "c")
+                "a or b or c" `parsesTo` EOp OOr (EOp OOr (v "a") (v "b")) (v "c")
+            , testCase "comparisons do not chain" $ do
+                rejects "a == b == c"
+                rejects "a < b < c"
+                rejects "a < b == c"
+            , testCase "parenthesized comparisons can be chained" $ do
+                "(a == b) == c" `parsesTo` EOp OEq (EOp OEq (v "a") (v "b")) (v "c")
+                "a == (b < c)" `parsesTo` EOp OEq (v "a") (EOp OLt (v "b") (v "c"))
+            , testCase "comparisons can be joined with and/or" $
+                "a < b and b < c or d"
+                    `parsesTo` EOp
+                        OOr
+                        (EOp OAnd (EOp OLt (v "a") (v "b")) (EOp OLt (v "b") (v "c")))
+                        (v "d")
+            , testCase "and/or are keywords, not variables" $ do
+                rejects "and"
+                rejects "or"
+            , testCase "variables may start with and/or" $
+                "andy orc" `parsesTo` EApp (v "andy") (v "orc")
+            , testCase "dangling and fails" $ rejects "a and"
             ]
         , testGroup
             "Application"

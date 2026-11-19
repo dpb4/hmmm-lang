@@ -97,6 +97,29 @@ inferFun params rett body = do
     traverse_ (constrain bodyt . typeToMaybe) rett
     return $ foldr (tfun . snd) bodyt ps
 
+inferOp :: Operator -> Infer TypeMaybe
+inferOp = \case
+    OAdd -> intIntToInt
+    OSub -> intIntToInt
+    OEq -> aaToBool
+    ONeq -> aaToBool
+    OGt -> intIntToBool
+    OGeq -> intIntToBool
+    OLt -> intIntToBool
+    OLeq -> intIntToBool
+    OAnd -> boolBoolToBool
+    OOr -> boolBoolToBool
+  where
+    int = TLit CInt
+    bool = TLit CBool
+    intIntToInt = return $ tfun int $ tfun int int
+    intIntToBool = return $ tfun int $ tfun int bool
+    boolBoolToBool = return $ tfun bool $ tfun bool bool
+    -- both sides of an equality must have the same type
+    aaToBool = do
+        a <- fresh
+        return $ tfun a $ tfun a bool
+
 -- | infer the type of an expression
 infer :: Expr -> Infer TypeMaybe
 infer = \case
@@ -132,12 +155,7 @@ infer = \case
         constrain funt $ tfun argt rett
         return rett
     EOp op a b -> do
-        let opt =
-                ( let int = TLit CInt
-                   in case op of
-                        OAdd -> tfun int $ tfun int int
-                        OSub -> tfun int $ tfun int int
-                )
+        opt <- inferOp op
         at <- infer a
         bt <- infer b
         rett <- fresh

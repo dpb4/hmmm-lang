@@ -130,6 +130,86 @@ endToEndTests =
             -- \f -> f 1 + 2  :  (Int -> Int) -> Int
             typeOf (EAbs (Bind "f" Nothing) (EOp OAdd (EApp (EVar "f") (ELit (LInt 1))) (ELit (LInt 2))))
                 @?= Right ((int ~> int) ~> int)
+        , operatorTests
+        ]
+
+operatorTests :: TestTree
+operatorTests =
+    testGroup
+        "Operators"
+        [ testCase "comparisons on ints are Bool" $
+            mapM_ (\o -> typeOf (EOp o (lit 1) (lit 2)) @?= Right bool) [OGt, OGeq, OLt, OLeq]
+        , testCase "comparisons on non-ints fail" $
+            mapM_
+                (\(o, a, b) -> assertLeft (show (EOp o a b) ++ " should fail") (typeOf (EOp o a b)))
+                [(o, a, b) | o <- [OGt, OGeq, OLt, OLeq], (a, b) <- [(str' "a", str' "b"), (true, true), (lit 1, true)]]
+        , testCase "and/or on bools are Bool" $
+            mapM_ (\o -> typeOf (EOp o true true) @?= Right bool) [OAnd, OOr]
+        , testCase "and/or on non-bools fail" $
+            mapM_
+                (\(o, a, b) -> assertLeft (show (EOp o a b) ++ " should fail") (typeOf (EOp o a b)))
+                [(o, a, b) | o <- [OAnd, OOr], (a, b) <- [(lit 1, lit 2), (true, lit 1), (str' "s", true)]]
+        , testCase "equality works on ints, bools and strings" $
+            mapM_
+                (\(o, a, b) -> typeOf (EOp o a b) @?= Right bool)
+                [(o, a, b) | o <- [OEq, ONeq], (a, b) <- [(lit 1, lit 2), (true, true), (str' "a", str' "b")]]
+        , testCase "equality on mismatched types fails" $
+            mapM_
+                (\(o, a, b) -> assertLeft (show (EOp o a b) ++ " should fail") (typeOf (EOp o a b)))
+                [(o, a, b) | o <- [OEq, ONeq], (a, b) <- [(lit 1, true), (str' "s", lit 1)]]
+        , testCase "equality constrains both sides to the same type" $
+            -- \x -> \y -> x == y  :  a -> a -> Bool
+            case typeOf (EAbs (plain "x") (EAbs (plain "y") (EOp OEq (EVar "x") (EVar "y")))) of
+                Right (TCon (TCFun (TVar a) (TCon (TCFun (TVar a') (TLit CBool))))) -> a @?= a'
+                other -> assertFailure $ "expected a -> a -> Bool, got " ++ show other
+        , testCase "equality with a literal determines the other side" $
+            -- \x -> x == "s"  :  Str -> Bool
+            typeOf (EAbs (plain "x") (EOp OEq (EVar "x") (str' "s"))) @?= Right (str ~> bool)
+        , testCase "comparison infers Int for its operands" $
+            -- \x -> \y -> x < y  :  Int -> Int -> Bool
+            typeOf (EAbs (plain "x") (EAbs (plain "y") (EOp OLt (EVar "x") (EVar "y"))))
+                @?= Right (int ~> int ~> bool)
+        , testCase "and infers Bool for its operands" $
+            -- \x -> x and true  :  Bool -> Bool
+            typeOf (EAbs (plain "x") (EOp OAnd (EVar "x") true)) @?= Right (bool ~> bool)
+        , testCase "comparison result can be an if condition" $
+            -- \x -> if x > 0 and x < 10 then x else 0  :  Int -> Int
+            typeOf
+                ( EAbs
+                    (plain "x")
+                    (EIf (EOp OAnd (EOp OGt (EVar "x") (lit 0)) (EOp OLt (EVar "x") (lit 10))) (EVar "x") (lit 0))
+                )
+                @?= Right (int ~> int)
+        , testCase "comparison result is not an Int" $
+            -- (1 < 2) + 1
+            assertLeft "should fail" (typeOf (EOp OAdd (EOp OLt (lit 1) (lit 2)) (lit 1)))
+        , testCase "chained comparison fails" $
+            -- (1 < 2) < 3
+            assertLeft "should fail" (typeOf (EOp OLt (EOp OLt (lit 1) (lit 2)) (lit 3)))
+        , testCase "chained equality compares the Bool result" $
+            -- (1 == 2) == false  :  Bool
+            typeOf (EOp OEq (EOp OEq (lit 1) (lit 2)) (ELit (LBool False))) @?= Right bool
+        , testCase "each use of == gets its own type variable" $
+            -- 1 == 2 and "a" == "b"
+            typeOf (EOp OAnd (EOp OEq (lit 1) (lit 2)) (EOp OEq (str' "a") (str' "b"))) @?= Right bool
+        , testCase "a let-bound equality function is polymorphic" $
+            -- let eq = \x -> \y -> x == y in eq 1 2 and eq "a" "b"
+            typeOf
+                ( ELet
+                    (plain "eq")
+                    (EAbs (plain "x") (EAbs (plain "y") (EOp OEq (EVar "x") (EVar "y"))))
+                    (EOp OAnd (app (EVar "eq") [lit 1, lit 2]) (app (EVar "eq") [str' "a", str' "b"]))
+                )
+                @?= Right bool
+        , testCase "a let-bound equality function still rejects mismatched arguments" $
+            -- let eq = \x -> \y -> x == y in eq 1 "a"
+            assertLeft "should fail" $
+                typeOf
+                    ( ELet
+                        (plain "eq")
+                        (EAbs (plain "x") (EAbs (plain "y") (EOp OEq (EVar "x") (EVar "y"))))
+                        (app (EVar "eq") [lit 1, str' "a"])
+                    )
         ]
 
 -- type annotations

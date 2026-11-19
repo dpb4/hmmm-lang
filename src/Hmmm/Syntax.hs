@@ -28,11 +28,27 @@ data Expr
 data Operator
     = OAdd
     | OSub
+    | OEq
+    | ONeq
+    | OGt
+    | OGeq
+    | OLt
+    | OLeq
+    | OAnd
+    | OOr
     deriving (Eq)
 
 instance Show Operator where
     show OAdd = "+"
     show OSub = "-"
+    show OEq = "=="
+    show ONeq = "/="
+    show OGt = ">"
+    show OGeq = ">="
+    show OLt = "<"
+    show OLeq = "<="
+    show OAnd = "and"
+    show OOr = "or"
 
 instance Show Binding where
     show (Bind n (Just t)) = n ++ ": " ++ show t

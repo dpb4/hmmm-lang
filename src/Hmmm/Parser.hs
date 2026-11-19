@@ -44,8 +44,8 @@ lexer =
         emptyDef
             { Tok.identStart = satisfy (\c -> isLetter c && c /= 'λ')
             , Tok.identLetter = alphaNum
-            , Tok.reservedNames = ["if", "then", "else", "let", "in", "true", "false"]
-            , Tok.reservedOpNames = ["+", "-", "->", "=", ":", "\\", "λ", ","]
+            , Tok.reservedNames = ["if", "then", "else", "let", "in", "true", "false", "and", "or"]
+            , Tok.reservedOpNames = ["+", "-", "->", "=", ":", "\\", "λ", ",", "==", "/=", ">", "<", ">=", "<=", "and", "or"]
             }
 
 identifier :: Parser String
@@ -68,6 +68,20 @@ opTable =
     [
         [ Infix (EOp OAdd <$ (continued *> reservedOp "+")) AssocLeft
         , Infix (EOp OSub <$ (continued *> reservedOp "-")) AssocLeft
+        ]
+    ,
+        [ Infix (EOp OEq <$ (continued *> reservedOp "==")) AssocNone
+        , Infix (EOp ONeq <$ (continued *> reservedOp "/=")) AssocNone
+        , Infix (EOp OGt <$ (continued *> reservedOp ">")) AssocNone
+        , Infix (EOp OGeq <$ (continued *> reservedOp ">=")) AssocNone
+        , Infix (EOp OLt <$ (continued *> reservedOp "<")) AssocNone
+        , Infix (EOp OLeq <$ (continued *> reservedOp "<=")) AssocNone
+        ]
+    ,
+        [ Infix (EOp OAnd <$ (continued *> reservedOp "and")) AssocLeft
+        ]
+    ,
+        [ Infix (EOp OOr <$ (continued *> reservedOp "or")) AssocLeft
         ]
     ]
 
