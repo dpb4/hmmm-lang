@@ -74,7 +74,13 @@ evalProgram :: [TopExpr] -> Eval [Value]
 evalProgram [] = return []
 evalProgram (top : rest) = case top of
     TELet (Bind name _) val -> define name val
-    TEFun (Bind name _) params body -> define name (foldr EAbs body params)
+    TEFun (Bind name _) [] body -> define name body
+    TEFun (Bind name _) (Bind param _ : params) body -> do
+        -- the closure's environment contains the closure itself, so the function can call itself
+        -- this relies on haskell's laziness
+        env <- ask
+        let self = VClosure (M.insert name self env) param (foldr EAbs body params)
+        local (M.insert name self) (evalProgram rest)
     TEExpr e -> (:) <$> eval e <*> evalProgram rest
   where
     define name val = do
@@ -121,7 +127,6 @@ evalApp fune arge = do
     arg <- eval arge
     apply fun arg
 
--- | apply a function value to an argument
 apply :: Value -> Value -> Eval Value
 apply fun arg = case fun of
     VClosure cenv param body -> local (const (M.insert param arg cenv)) (eval body)

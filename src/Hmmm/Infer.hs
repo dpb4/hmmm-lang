@@ -93,6 +93,19 @@ inferDefinition bind inferVal = do
     ctx <- asks (applySubst s)
     return (vid, generalize ctx (applySubst s valt), s)
 
+{- | infer a top-level function that may call itself;
+inside its own body the function is monomorphic, it is only generalized afterwards.
+a function with no parameters is a value, so it cannot refer to itself
+-}
+inferRecFun :: Name -> [Binding] -> Maybe Type -> Expr -> Infer TypeMaybe
+inferRecFun _ [] rett body = inferFun [] rett body
+inferRecFun name params rett body = do
+    self <- fresh
+    -- infer the function body, and allow it to see its own (outer) type, self
+    t <- local (M.insert name (ForAll S.empty self)) (inferFun params rett body)
+    constrain self t
+    return t
+
 -- | infer a top-level function: params -> ... -> body, with an optional return type
 inferFun :: [Binding] -> Maybe Type -> Expr -> Infer TypeMaybe
 inferFun params rett body = do
@@ -195,7 +208,7 @@ inferProgram :: [TopExpr] -> Infer [TypeMaybe]
 inferProgram [] = return []
 inferProgram (top : rest) = case top of
     TELet bind val -> define bind (infer val)
-    TEFun (Bind name rett) params body -> define (Bind name Nothing) (inferFun params rett body)
+    TEFun (Bind name rett) params body -> define (Bind name Nothing) (inferRecFun name params rett body)
     TEExpr e -> do
         (t, cs) <- listen (infer e)
         s <- either throwError return $ runSolve cs

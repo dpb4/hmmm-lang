@@ -429,10 +429,7 @@ programTests =
         , testCase "later definitions shadow earlier ones" $
             typeOfProgram [TELet (plain "g") (lit 1), TELet (plain "g") true, TEExpr (EVar "g")]
                 @?= Right [bool]
-        , testCase "top-level functions are not recursive (yet)" $
-            -- let f (x) = f x
-            assertLeft "f is not in scope in its own body" $
-                typeOfProgram [TEFun (plain "f") [plain "x"] (EApp (EVar "f") (EVar "x"))]
+        , recursionTests
         , testCase "top-level let ... in expression" $
             typeOfProgram [TEExpr (ELet (plain "x") (lit 1) (EVar "x"))] @?= Right [int]
         , testCase "type errors in unused definitions are reported" $
@@ -716,3 +713,109 @@ listTests =
                     @?= Right [list int, list str]
             ]
         ]
+
+-- recursion
+
+-- | let sum (n) = if n == 0 then 0 else n + sum (n - 1)
+sumDef :: TopExpr
+sumDef =
+    TEFun
+        (plain "sum")
+        [plain "n"]
+        ( EIf
+            (EOp OEq (EVar "n") (lit 0))
+            (lit 0)
+            (EOp OAdd (EVar "n") (EApp (EVar "sum") (EOp OSub (EVar "n") (lit 1))))
+        )
+
+recursionTests :: TestTree
+recursionTests =
+    testGroup
+        "Recursion"
+        [ testCase "a recursive function" $
+            typeOfProgram [sumDef, TEExpr (EVar "sum")] @?= Right [int ~> int]
+        , testCase "a recursive call can be used in a later expression" $
+            typeOfProgram [sumDef, TEExpr (EApp (EVar "sum") (lit 10))] @?= Right [int]
+        , testCase "a recursive function with an annotated return type" $
+            -- let sum (n: int): int = ...
+            typeOfProgram [annotated, TEExpr (EVar "sum")] @?= Right [int ~> int]
+        , testCase "a recursive call that contradicts the annotation fails" $
+            -- let f (x: int): int = f true
+            assertLeft "should fail" $
+                typeOfProgram [TEFun ("f" .: aInt) ["x" .: aInt] (EApp (EVar "f") true)]
+        , testCase "a recursive call with too many arguments fails" $
+            -- let f (x: int): int = f x x
+            assertLeft "should fail" $
+                typeOfProgram [TEFun ("f" .: aInt) ["x" .: aInt] (app (EVar "f") [EVar "x", EVar "x"])]
+        , testCase "recursion with several parameters" $
+            -- let countdown (n, acc) = if n == 0 then acc else countdown (n - 1) (n ++ acc)
+            typeOfProgram
+                [ TEFun
+                    (plain "countdown")
+                    [plain "n", plain "acc"]
+                    ( EIf
+                        (EOp OEq (EVar "n") (lit 0))
+                        (EVar "acc")
+                        (app (EVar "countdown") [EOp OSub (EVar "n") (lit 1), cons (EVar "n") (EVar "acc")])
+                    )
+                , TEExpr (EVar "countdown")
+                ]
+                @?= Right [int ~> list int ~> list int]
+        , testCase "a function that only calls itself is fully polymorphic" $
+            -- let loop (x) = loop x  :  a -> b
+            case typeOfProgram [TEFun (plain "loop") [plain "x"] (EApp (EVar "loop") (EVar "x")), TEExpr (EVar "loop")] of
+                Right [TCon (TCFun (TVar a) (TVar b))] -> assertBool "a and b should differ" (a /= b)
+                other -> assertFailure $ "expected [a -> b], got " ++ show other
+        , testCase "a function is monomorphic in its own body" $
+            -- let f (x) = if f true then x else f 1
+            assertLeft "should fail" $
+                typeOfProgram
+                    [ TEFun
+                        (plain "f")
+                        [plain "x"]
+                        (EIf (EApp (EVar "f") true) (EVar "x") (EApp (EVar "f") (lit 1)))
+                    ]
+        , testCase "a recursive function is polymorphic after its definition" $
+            -- let id (x) = if true then x else id x; id 1; id true
+            typeOfProgram
+                [ TEFun (plain "id") [plain "x"] (EIf true (EVar "x") (EApp (EVar "id") (EVar "x")))
+                , TEExpr (EApp (EVar "id") (lit 1))
+                , TEExpr (EApp (EVar "id") true)
+                ]
+                @?= Right [int, bool]
+        , testCase "returning itself is an infinite type" $
+            -- let f (x) = f
+            assertLeft "should fail" $ typeOfProgram [TEFun (plain "f") [plain "x"] (EVar "f")]
+        , testCase "a function with no parameters cannot refer to itself" $
+            -- let f () = f
+            assertLeft "should fail" $ typeOfProgram [TEFun (plain "f") [] (EVar "f")]
+        , testCase "values cannot refer to themselves" $
+            -- let x = x
+            assertLeft "should fail" $ typeOfProgram [TELet (plain "x") (EVar "x")]
+        , testCase "a recursive function can use earlier definitions" $
+            -- let one = 1; let f (n) = if n == 0 then one else f (n - one)
+            typeOfProgram
+                [ TELet (plain "one") (lit 1)
+                , TEFun
+                    (plain "f")
+                    [plain "n"]
+                    (EIf (EOp OEq (EVar "n") (lit 0)) (EVar "one") (EApp (EVar "f") (EOp OSub (EVar "n") (EVar "one"))))
+                , TEExpr (EVar "f")
+                ]
+                @?= Right [int ~> int]
+        , testCase "functions are not mutually recursive" $
+            -- let even (n) = odd n; let odd (n) = even n
+            assertLeft "odd is not defined yet in even" $
+                typeOfProgram
+                    [ TEFun (plain "even") [plain "n"] (EApp (EVar "odd") (EVar "n"))
+                    , TEFun (plain "odd") [plain "n"] (EApp (EVar "even") (EVar "n"))
+                    ]
+        , testCase "let expressions are not recursive" $
+            -- let f = \x -> f x in f
+            assertLeft "should fail" $
+                typeOf (ELet (plain "f") (lam "x" (EApp (EVar "f") (EVar "x"))) (EVar "f"))
+        ]
+  where
+    annotated = case sumDef of
+        TEFun _ _ body -> TEFun ("sum" .: aInt) ["n" .: aInt] body
+        other -> other

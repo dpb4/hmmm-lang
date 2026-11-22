@@ -267,6 +267,7 @@ programTests =
                 , TEExpr (app (v "twice") [lam "y" (add (v "y") (lit 1)), lit 0])
                 ]
                 [VInt 2]
+        , recursionTests
         , testCase "a function with no parameters is a value" $
             -- let f () = 1; f
             runs [TEFun (plain "f") [] (lit 1), TEExpr (v "f")] [VInt 1]
@@ -444,4 +445,72 @@ listTests =
                     ]
                     [ints [1], VList [vstr "a", vstr "b"]]
             ]
+        ]
+
+-- | let sum (n) = if n == 0 then 0 else n + sum (n - 1)
+sumDef :: TopExpr
+sumDef =
+    TEFun
+        (plain "sum")
+        [plain "n"]
+        (EIf (EOp OEq (v "n") (lit 0)) (lit 0) (add (v "n") (EApp (v "sum") (sub (v "n") (lit 1)))))
+
+recursionTests :: TestTree
+recursionTests =
+    testGroup
+        "Recursion"
+        [ testCase "a recursive function" $
+            runs [sumDef, TEExpr (EApp (v "sum") (lit 10))] [VInt 55]
+        , testCase "the base case alone" $ runs [sumDef, TEExpr (EApp (v "sum") (lit 0))] [VInt 0]
+        , testCase "deep recursion" $ runs [sumDef, TEExpr (EApp (v "sum") (lit 10000))] [VInt 50005000]
+        , testCase "recursion with several parameters" $
+            -- let countdown (n, acc) = if n == 0 then acc else countdown (n - 1) (n ++ acc); countdown 3 []
+            runs
+                [ TEFun
+                    (plain "countdown")
+                    [plain "n", plain "acc"]
+                    ( EIf
+                        (EOp OEq (v "n") (lit 0))
+                        (v "acc")
+                        (app (v "countdown") [sub (v "n") (lit 1), cons (v "n") (v "acc")])
+                    )
+                , TEExpr (app (v "countdown") [lit 3, EList []])
+                ]
+                [ints [1, 2, 3]]
+        , testCase "a partially applied recursive function" $
+            -- let add (n, x) = if n == 0 then x else add (n - 1) (x + 1); let add3 = add 3; add3 4
+            runs
+                [ TEFun
+                    (plain "add")
+                    [plain "n", plain "x"]
+                    (EIf (EOp OEq (v "n") (lit 0)) (v "x") (app (v "add") [sub (v "n") (lit 1), add (v "x") (lit 1)]))
+                , TELet (plain "add3") (EApp (v "add") (lit 3))
+                , TEExpr (EApp (v "add3") (lit 4))
+                ]
+                [VInt 7]
+        , testCase "recursion through a returned lambda" $
+            -- let adder (n) = \x -> if n == 0 then x else adder (n - 1) (x + 1); adder 2 5
+            runs
+                [ TEFun
+                    (plain "adder")
+                    [plain "n"]
+                    (lam "x" (EIf (EOp OEq (v "n") (lit 0)) (v "x") (app (v "adder") [sub (v "n") (lit 1), add (v "x") (lit 1)])))
+                , TEExpr (app (v "adder") [lit 2, lit 5])
+                ]
+                [VInt 7]
+        , testCase "the recursive call refers to the function, not a later definition" $
+            -- let f (n) = if n == 0 then 0 else f (n - 1); let g = f; let f = \x -> 100; g 3
+            runs
+                [ TEFun (plain "f") [plain "n"] (EIf (EOp OEq (v "n") (lit 0)) (lit 0) (EApp (v "f") (sub (v "n") (lit 1))))
+                , TELet (plain "g") (v "f")
+                , TELet (plain "f") (lam "x" (lit 100))
+                , TEExpr (EApp (v "g") (lit 3))
+                ]
+                [VInt 0]
+        , testCase "a recursive function is only called when applied" $
+            -- let loop (x) = loop x; 1
+            runs [TEFun (plain "loop") [plain "x"] (EApp (v "loop") (v "x")), TEExpr (lit 1)] [VInt 1]
+        , testCase "a function with no parameters cannot refer to itself" $
+            -- let f () = f
+            assertLeft "should fail" $ runEvalProgram [TEFun (plain "f") [] (v "f"), TEExpr (lit 1)]
         ]

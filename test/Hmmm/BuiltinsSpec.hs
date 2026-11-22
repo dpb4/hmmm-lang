@@ -124,6 +124,37 @@ builtinTests =
                         ]
                 typeOfProgram builtinTypes prog @?= Right [char]
                 runEvalProgram builtinEnv prog @?= Right [VChar 'b']
+            , testCase "recursive functions over lists" $ do
+                -- let length (xs) = if empty? xs then 0 else 1 + length (tail xs)
+                -- let map (f, xs) = if empty? xs then [] else f (head xs) ++ map f (tail xs)
+                -- length "abc"; map (\x -> x + 1) [1, 2, 3]; map length ["a", "", "bc"]
+                let prog =
+                        [ TEFun
+                            (Bind "length" Nothing)
+                            [Bind "xs" Nothing]
+                            ( EIf
+                                (call "empty?" [EVar "xs"])
+                                (lit 0)
+                                (EOp OAdd (lit 1) (call "length" [call "tail" [EVar "xs"]]))
+                            )
+                        , TEFun
+                            (Bind "map" Nothing)
+                            [Bind "f" Nothing, Bind "xs" Nothing]
+                            ( EIf
+                                (call "empty?" [EVar "xs"])
+                                (EList [])
+                                ( EOp
+                                    OCons
+                                    (EApp (EVar "f") (call "head" [EVar "xs"]))
+                                    (call "map" [EVar "f", call "tail" [EVar "xs"]])
+                                )
+                            )
+                        , TEExpr (call "length" [strLit "abc"])
+                        , TEExpr (call "map" [lam "x" (EOp OAdd (EVar "x") (lit 1)), ints [1, 2, 3]])
+                        , TEExpr (call "map" [EVar "length", EList [strLit "a", strLit "", strLit "bc"]])
+                        ]
+                typeOfProgram builtinTypes prog @?= Right [int, list int, list int]
+                runEvalProgram builtinEnv prog @?= Right [VInt 3, vints [2, 3, 4], vints [1, 0, 2]]
             , testCase "without the builtins, they are unbound" $ do
                 assertLeft "should fail" (typeOf M.empty (EVar "head"))
                 assertLeft "should fail" (runEval M.empty (EVar "head"))
