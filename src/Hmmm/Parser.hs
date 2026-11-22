@@ -49,7 +49,7 @@ lexer =
             , Tok.identLetter = alphaNum <|> char '?'
             , Tok.commentLine = "--"
             , Tok.reservedNames = ["if", "then", "else", "let", "in", "true", "false", "and", "or"]
-            , Tok.reservedOpNames = ["+", "-", "->", "=", ":", "\\", "λ", ",", "==", "/=", ">", "<", ">=", "<=", "and", "or", "++", "+++"]
+            , Tok.reservedOpNames = ["+", "-", "->", "=", ":", "\\", "λ", ",", "==", "/=", ">", "<", ">=", "<=", "and", "or", "++", "+++", "."]
             }
 
 identifier :: Parser String
@@ -94,6 +94,10 @@ opTable =
     ,
         [ Infix (EOp OOr <$ (continued *> reservedOp "or")) AssocLeft
         ]
+    , -- application with the lowest precedence, like haskell's $: f . g x = f (g x)
+      -- it is only syntax, so it desugars to an ordinary application
+      [ Infix (EApp <$ (continued *> reservedOp ".")) AssocRight
+      ]
     ]
 
 -- | operators bind looser than application: f x + 1 = (f x) + 1

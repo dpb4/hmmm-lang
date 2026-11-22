@@ -131,6 +131,9 @@ libraryTests =
             "range 1 4" `evaluates` "[1, 2, 3, 4]"
             "range 3 3" `evaluates` "[3]"
             "range 2 1" `evaluates` "[]"
+        , testCase ". chains library functions" $ do
+            "sum . map (\\x -> x + 1) . range 1 3" `evaluates` "9"
+            "reverse . filter (\\c -> not . c == ' ') \"a b\"" `evaluates` "\"ba\""
         , testCase "functions combine" $
             "sum (map (\\x -> x + x) (filter (\\x -> x > 2) (range 1 5)))" `evaluates` "24"
         , testCase "library functions are polymorphic" $

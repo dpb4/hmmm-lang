@@ -180,6 +180,37 @@ parserTests =
             , testCase "variables may start with and/or" $
                 "andy orc" `parsesTo` EApp (v "andy") (v "orc")
             , testCase "dangling and fails" $ rejects "a and"
+            , testCase ". is application" $ "f . x" `parsesTo` EApp (v "f") (v "x")
+            , testCase ". applies to everything on its right" $
+                "f . g x" `parsesTo` EApp (v "f") (EApp (v "g") (v "x"))
+            , testCase "f . g x is f (g x)" $ runParse "f . g x" @?= runParse "f (g x)"
+            , testCase "without . application is left associative" $
+                "f g x" `parsesTo` EApp (EApp (v "f") (v "g")) (v "x")
+            , testCase ". is right associative" $
+                "f . g . h x" `parsesTo` EApp (v "f") (EApp (v "g") (EApp (v "h") (v "x")))
+            , testCase "the left side of . can be an application" $
+                "f a . g b" `parsesTo` EApp (EApp (v "f") (v "a")) (EApp (v "g") (v "b"))
+            , testCase ". binds looser than every other operator" $ do
+                "f . x + 1" `parsesTo` EApp (v "f") (EOp OAdd (v "x") (int 1))
+                "f . 1 ++ xs" `parsesTo` EApp (v "f") (EOp OCons (int 1) (v "xs"))
+                "f . x == y" `parsesTo` EApp (v "f") (EOp OEq (v "x") (v "y"))
+                "f . a or b" `parsesTo` EApp (v "f") (EOp OOr (v "a") (v "b"))
+            , testCase ". without whitespace" $ "f.x" `parsesTo` EApp (v "f") (v "x")
+            , testCase ". inside parentheses" $
+                "f (g . x) y" `parsesTo` EApp (EApp (v "f") (EApp (v "g") (v "x"))) (v "y")
+            , testCase ". before a lambda" $
+                "f . \\x -> x" `parsesTo` EApp (v "f") (EAbs (b "x") (v "x"))
+            , testCase ". inside a lambda body" $
+                "\\x -> f . g x" `parsesTo` EAbs (b "x") (EApp (v "f") (EApp (v "g") (v "x")))
+            , testCase ". before an if" $
+                "f . if c then 1 else 2" `parsesTo` EApp (v "f") (EIf (v "c") (int 1) (int 2))
+            , testCase ". in an if branch" $
+                "if c then f . x else y" `parsesTo` EIf (v "c") (EApp (v "f") (v "x")) (v "y")
+            , testCase "dangling . fails" $ rejects "f ."
+            , testCase "leading . fails" $ rejects ". f"
+            , testCase "an indented . continues the item" $
+                "f\n  . g x" `programIs` [TEExpr (EApp (v "f") (EApp (v "g") (v "x")))]
+            , testCase "a line starting with . is not a continuation" $ rejectsProgram "f\n. g x"
             , testCase "cons" $ "1 ++ xs" `parsesTo` EOp OCons (int 1) (v "xs")
             , testCase "append" $ "xs +++ ys" `parsesTo` EOp OAppend (v "xs") (v "ys")
             , testCase "cons is right associative" $
