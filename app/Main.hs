@@ -4,6 +4,7 @@ module Main (main) where
 
 import Control.Exception (IOException, try)
 import Control.Monad (unless)
+import Hmmm.Builtins (builtinEnv, builtinTypes)
 import Hmmm.Eval
 import Hmmm.Infer (typeOf, typeOfProgram)
 import Hmmm.Parser
@@ -36,9 +37,9 @@ run :: String -> IO ()
 run line =
     case runParse line of
         Left err -> putStrLn $ "parse error:\n" ++ err
-        Right expr -> case typeOf expr of
+        Right expr -> case typeOf builtinTypes expr of
             Left err -> putStrLn $ "type error:\n" ++ err
-            Right t -> case runEval expr of
+            Right t -> case runEval builtinEnv expr of
                 Left err -> putStrLn $ "runtime error:\n" ++ err
                 Right v -> putStrLn ("-> " ++ display t v ++ " : " ++ show t)
 
@@ -46,9 +47,9 @@ runFile :: String -> IO ()
 runFile source =
     case runParseTopExprs source of
         Left err -> failWith $ "parse error:\n" ++ err
-        Right prog -> case typeOfProgram prog of
+        Right prog -> case typeOfProgram builtinTypes prog of
             Left err -> failWith $ "type error:\n" ++ err
-            Right ts -> case runEvalProgram prog of
+            Right ts -> case runEvalProgram builtinEnv prog of
                 Left err -> failWith $ "runtime error:\n" ++ err
                 Right vs -> mapM_ putStrLn (zipWith display ts vs)
 

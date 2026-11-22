@@ -96,6 +96,12 @@ parserTests =
                 "True" `parsesTo` v "True"
                 "False" `parsesTo` v "False"
             , testCase "alphanumeric variable" $ "x1" `parsesTo` v "x1"
+            , testCase "variable with a question mark" $ do
+                "empty?" `parsesTo` v "empty?"
+                "a?b" `parsesTo` v "a?b"
+            , testCase "variable cannot start with a question mark" $ rejects "?x"
+            , testCase "a predicate applied to an argument" $
+                "empty? xs" `parsesTo` EApp (v "empty?") (v "xs")
             , -- FIXME: this parses just fine as App 1 x. i dont like that
               -- make numbers more robust then uncomment this
               -- testCase "variable cannot start with number" $ rejects "1x"

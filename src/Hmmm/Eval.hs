@@ -1,7 +1,10 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Hmmm.Eval (
+    Env,
+    Eval,
     eval,
+    apply,
     runEval,
     runEvalProgram,
     display,
@@ -24,7 +27,21 @@ data Value
     | VChar Char
     | VClosure Env Name Expr
     | VList (List Value)
-    deriving (Eq)
+    | -- | a builtin function, implemented in Haskell
+      VPrim Name (Value -> Eval Value)
+
+{- | structural equality for tests;
+builtins are compared by name
+hmmm's @==@ uses evalOpEq, wherein functions are never equal
+-}
+instance Eq Value where
+    VInt a == VInt b = a == b
+    VBool a == VBool b = a == b
+    VChar a == VChar b = a == b
+    VClosure env p body == VClosure env' p' body' = (env, p, body) == (env', p', body')
+    VList a == VList b = a == b
+    VPrim a _ == VPrim b _ = a == b
+    _ == _ = False
 
 instance Show Value where
     show (VInt i) = show i
@@ -32,10 +49,10 @@ instance Show Value where
     show (VChar c) = show c
     show (VClosure _ p b) = "λ" ++ p ++ " -> " ++ show b
     show (VList l) = show l
+    show (VPrim n _) = "<builtin " ++ n ++ ">"
 
 {- | show a value using its type;
-values don't know their own types, so this is the only way to print
-a List Char as a string, or tell an empty string from an empty list
+this is necessary because a value doesn't know its own type, so this can disambiguate empty lists from empty strings
 -}
 display :: TypeMaybe -> Value -> String
 display t v = case (t, v) of
@@ -45,11 +62,13 @@ display t v = case (t, v) of
 
 type Eval a = ReaderT Env (Except String) a
 
-runEval :: Expr -> Either String Value
-runEval e = runExcept (runReaderT (eval e) M.empty)
+-- | evaluate an expression, starting from the given environment (eg. the builtins)
+runEval :: Env -> Expr -> Either String Value
+runEval env e = runExcept (runReaderT (eval e) env)
 
-runEvalProgram :: [TopExpr] -> Either String [Value]
-runEvalProgram prog = runExcept (runReaderT (evalProgram prog) M.empty)
+-- | evaluate a program, starting from the given environment (eg. the builtins)
+runEvalProgram :: Env -> [TopExpr] -> Either String [Value]
+runEvalProgram env prog = runExcept (runReaderT (evalProgram prog) env)
 
 evalProgram :: [TopExpr] -> Eval [Value]
 evalProgram [] = return []
@@ -100,9 +119,14 @@ evalApp :: Expr -> Expr -> Eval Value
 evalApp fune arge = do
     fun <- eval fune
     arg <- eval arge
-    case fun of
-        VClosure cenv param body -> local (const (M.insert param arg cenv)) (eval body)
-        _ -> throwError "applying a non-function to an argument"
+    apply fun arg
+
+-- | apply a function value to an argument
+apply :: Value -> Value -> Eval Value
+apply fun arg = case fun of
+    VClosure cenv param body -> local (const (M.insert param arg cenv)) (eval body)
+    VPrim _ f -> f arg
+    _ -> throwError ("applying a non-function " ++ show fun ++ " to an argument")
 
 evalOp :: Operator -> Expr -> Expr -> Eval Value
 evalOp o ae be = do
@@ -144,13 +168,15 @@ evalOpEq (VList a) (VList b)
   where
     isTrue = (== VBool True)
 -- two functions are never equal, even if they are the same closure
-evalOpEq (VClosure {}) (VClosure {}) = return $ VBool False
+evalOpEq (VClosure{}) (VClosure{}) = return $ VBool False
+evalOpEq (VPrim{}) (VPrim{}) = return $ VBool False
 evalOpEq _ _ = return $ VBool False
 
 evalOpNeq :: Value -> Value -> Eval Value
-evalOpNeq a b = evalOpEq a b >>= \case
-    VBool eq -> return $ VBool (not eq)
-    v -> throwError ("(==) returned a non-bool " ++ show v)
+evalOpNeq a b =
+    evalOpEq a b >>= \case
+        VBool eq -> return $ VBool (not eq)
+        v -> throwError ("(==) returned a non-bool (SHOULD NOT HAPPEN)" ++ show v)
 
 evalOpGt :: Value -> Value -> Eval Value
 evalOpGt (VInt a) (VInt b) = return $ VBool (a > b)

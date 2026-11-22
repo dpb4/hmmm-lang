@@ -20,7 +20,7 @@ name:               hmmm-lang
 -- PVP summary:     +-+------- breaking API changes
 --                  | | +----- non-breaking API additions
 --                  | | | +--- code changes with no API change
-version:            0.7.0.0
+version:            0.7.1.0
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -65,6 +65,7 @@ library
         Hmmm.Infer
         Hmmm.Parser
         Hmmm.Eval
+        Hmmm.Builtins
 
     -- Modules included in this library but not exported.
     -- other-modules:
@@ -134,6 +135,7 @@ test-suite hmmm-lang-test
         Hmmm.TypeInference.UnifySpec
         Hmmm.TypeInference.InferSpec
         Hmmm.EvalSpec
+        Hmmm.BuiltinsSpec
 
     -- Test dependencies.
     build-depends:

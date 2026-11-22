@@ -3,11 +3,23 @@ module Hmmm.TypeInference.InferSpec (inferTests, endToEndTests, annotationTests,
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Helpers
-import Hmmm.Infer
+import Hmmm.Infer hiding (runInfer, typeOf, typeOfProgram)
+import qualified Hmmm.Infer as I
 import Hmmm.Syntax
 import Hmmm.Types
 import Test.Tasty
 import Test.Tasty.HUnit
+
+-- these tests cover the core language, so they start from an empty context, without builtins
+
+runInfer :: Expr -> Either String (TypeMaybe, FreeVarCount, [Constraint])
+runInfer = I.runInfer M.empty
+
+typeOf :: Expr -> Either String TypeMaybe
+typeOf = I.typeOf M.empty
+
+typeOfProgram :: [TopExpr] -> Either String [TypeMaybe]
+typeOfProgram = I.typeOfProgram M.empty
 
 -- let foo = \x -> x + 3 in foo 5
 exp1 :: Expr

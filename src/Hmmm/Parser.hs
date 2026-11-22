@@ -29,7 +29,9 @@ import Text.Parsec.Language (emptyDef)
 import Text.Parsec.String
 import qualified Text.Parsec.Token as Tok
 
--- | parse a whole input string; leading whitespace is allowed, trailing input is not
+{- | parse a whole input string;
+leading/trailing whitespace is allowed, trailing input is not
+-}
 runParse :: String -> Either String Expr
 runParse input =
     case parse (whiteSpace *> parseExpr <* eof) "input" input of
@@ -44,7 +46,7 @@ lexer =
     Tok.makeTokenParser
         emptyDef
             { Tok.identStart = satisfy (\c -> isLetter c && c /= 'λ')
-            , Tok.identLetter = alphaNum
+            , Tok.identLetter = alphaNum <|> char '?'
             , Tok.reservedNames = ["if", "then", "else", "let", "in", "true", "false", "and", "or"]
             , Tok.reservedOpNames = ["+", "-", "->", "=", ":", "\\", "λ", ",", "==", "/=", ">", "<", ">=", "<=", "and", "or", "++", "+++"]
             }
@@ -99,7 +101,7 @@ parseExpr = buildExpressionParser opTable parseApp
 
 {- | succeeds only if the next token is not at the start of a line;
 a token in column 1 begins a new top-level item, so an expression can only
-continue onto the next line if that line is indented (a simplified offside rule)
+continue onto the next line if that line is indented
 -}
 continued :: Parser ()
 continued = do
@@ -161,7 +163,6 @@ parseLit =
     )
         <|> (EList . map (ELit . LChar) <$> Tok.stringLiteral lexer)
 
--- | a list literal: @[]@, @[1, 2]@, @[f 1, a, b]@
 parseList :: Parser Expr
 parseList = EList <$> brackets (sepBy parseExpr (reservedOp ","))
 

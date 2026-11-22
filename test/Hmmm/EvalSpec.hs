@@ -3,11 +3,20 @@ module Hmmm.EvalSpec (evalTests) where
 import qualified Data.Map as M
 import Helpers (assertLeft, strLit)
 import qualified Helpers as H
-import Hmmm.Eval
+import Hmmm.Eval hiding (runEval, runEvalProgram)
+import qualified Hmmm.Eval as E
 import Hmmm.Syntax
 import Hmmm.Types
 import Test.Tasty
 import Test.Tasty.HUnit
+
+-- these tests cover the core language, so they start from an empty environment, without builtins
+
+runEval :: Expr -> Either String Value
+runEval = E.runEval M.empty
+
+runEvalProgram :: [TopExpr] -> Either String [Value]
+runEvalProgram = E.runEvalProgram M.empty
 
 evalsTo :: Expr -> Value -> Assertion
 evalsTo e expected = runEval e @?= Right expected

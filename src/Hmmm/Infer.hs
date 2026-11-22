@@ -180,13 +180,14 @@ infer = \case
         return rett
     EList l -> inferList l
 
-runInfer :: Expr -> Either String (TypeMaybe, FreeVarCount, [Constraint])
-runInfer i = runIdentity $ runExceptT $ runRWST (infer i) M.empty 0
+-- | generate the constraints of an expression, starting from the given context (eg. the builtins)
+runInfer :: Context -> Expr -> Either String (TypeMaybe, FreeVarCount, [Constraint])
+runInfer ctx i = runIdentity $ runExceptT $ runRWST (infer i) ctx 0
 
 -- | infer the constraints of an expression, solve them, and return its type
-typeOf :: Expr -> Either String TypeMaybe
-typeOf e = do
-    (t, _, cs) <- runInfer e
+typeOf :: Context -> Expr -> Either String TypeMaybe
+typeOf ctx e = do
+    (t, _, cs) <- runInfer ctx e
     s <- runSolve cs
     return (applySubst s t)
 
@@ -205,7 +206,7 @@ inferProgram (top : rest) = case top of
         local (M.insert name t . applySubst s) (inferProgram rest)
 
 -- | the type of each top-level expression in a program, in order
-typeOfProgram :: [TopExpr] -> Either String [TypeMaybe]
-typeOfProgram prog = do
-    (ts, _, _) <- runIdentity $ runExceptT $ runRWST (inferProgram prog) M.empty 0
+typeOfProgram :: Context -> [TopExpr] -> Either String [TypeMaybe]
+typeOfProgram ctx prog = do
+    (ts, _, _) <- runIdentity $ runExceptT $ runRWST (inferProgram prog) ctx 0
     return ts

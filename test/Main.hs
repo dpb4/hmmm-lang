@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Hmmm.BuiltinsSpec (builtinTests)
 import Hmmm.EvalSpec (evalTests)
 import Hmmm.ParserSpec (parserTests)
 import Hmmm.TypeInference (typeInferenceTests)
@@ -15,4 +16,5 @@ tests =
         [ parserTests
         , typeInferenceTests
         , evalTests
+        , builtinTests
         ]
