@@ -149,14 +149,17 @@ parseLet =
         <*> (reservedOp "=" *> parseExpr)
         <*> (reserved "in" *> parseExpr)
 
+-- | a string literal is shorthand for a list of chars: @"ab"@ = @['a', 'b']@
 parseLit :: Parser Expr
 parseLit =
-    ELit
+    ( ELit
         <$> ( (LInt <$> Tok.natural lexer)
                 <|> (LBool True <$ reserved "true")
                 <|> (LBool False <$ reserved "false")
-                <|> (LStr <$> Tok.stringLiteral lexer)
+                <|> (LChar <$> Tok.charLiteral lexer)
             )
+    )
+        <|> (EList . map (ELit . LChar) <$> Tok.stringLiteral lexer)
 
 -- | a list literal: @[]@, @[1, 2]@, @[f 1, a, b]@
 parseList :: Parser Expr
@@ -170,7 +173,7 @@ parseBinding = Bind <$> parseId <*> optionMaybe (reservedOp ":" *> parseType)
 parseType :: Parser Type
 parseType = foldr1 (\a b -> TC (TCFun a b)) <$> sepBy1 parseTypeAtom (reservedOp "->")
 
-{- | list types can be written @[T]@ or @list T@;
+{- | list types can be written @[T]@ or @list T@; @str@ is a synonym for @[char]@;
 @list@ applies to a single type atom, so it binds tighter than @->@:
 @list int -> int@ = @(list int) -> int@
 -}
@@ -185,7 +188,8 @@ parseTypeAtom =
     named name = case name of
         "int" -> return $ T CInt
         "bool" -> return $ T CBool
-        "str" -> return $ T CStr
+        "char" -> return $ T CChar
+        "str" -> return $ tlist (T CChar)
         "list" -> tlist <$> parseTypeAtom
         _ -> unexpected $ "type name " ++ show name
 

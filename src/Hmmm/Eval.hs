@@ -4,6 +4,7 @@ module Hmmm.Eval (
     eval,
     runEval,
     runEvalProgram,
+    display,
     Value (..),
 ) where
 
@@ -13,13 +14,14 @@ import Control.Monad.Reader
 import Data.List
 import qualified Data.Map as M
 import Hmmm.Syntax
+import Hmmm.Types
 
 type Env = M.Map Name Value
 
 data Value
     = VInt Integer
     | VBool Bool
-    | VStr String
+    | VChar Char
     | VClosure Env Name Expr
     | VList (List Value)
     deriving (Eq)
@@ -27,9 +29,19 @@ data Value
 instance Show Value where
     show (VInt i) = show i
     show (VBool i) = show i
-    show (VStr i) = show i
+    show (VChar c) = show c
     show (VClosure _ p b) = "λ" ++ p ++ " -> " ++ show b
     show (VList l) = show l
+
+{- | show a value using its type;
+values don't know their own types, so this is the only way to print
+a List Char as a string, or tell an empty string from an empty list
+-}
+display :: TypeMaybe -> Value -> String
+display t v = case (t, v) of
+    (TCon (TCList (TLit CChar)), VList cs) -> show [c | VChar c <- cs]
+    (TCon (TCList et), VList vs) -> "[" ++ intercalate ", " (map (display et) vs) ++ "]"
+    _ -> show v
 
 type Eval a = ReaderT Env (Except String) a
 
@@ -124,7 +136,7 @@ evalOpSub x y = throwError ("(-) requires two integers (got " ++ show x ++ ", " 
 evalOpEq :: Value -> Value -> Eval Value
 evalOpEq (VInt a) (VInt b) = return $ VBool (a == b)
 evalOpEq (VBool a) (VBool b) = return $ VBool (a == b)
-evalOpEq (VStr a) (VStr b) = return $ VBool (a == b)
+evalOpEq (VChar a) (VChar b) = return $ VBool (a == b)
 -- lists are equal if they have the same length and each pair of elements is equal
 evalOpEq (VList a) (VList b)
     | length a /= length b = return $ VBool False
@@ -192,4 +204,4 @@ evalLit :: Literal -> Eval Value
 evalLit l = return $ case l of
     LInt i -> VInt i
     LBool b -> VBool b
-    LStr s -> VStr s
+    LChar c -> VChar c

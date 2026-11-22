@@ -1,7 +1,8 @@
 module Hmmm.EvalSpec (evalTests) where
 
 import qualified Data.Map as M
-import Helpers (assertLeft)
+import Helpers (assertLeft, strLit)
+import qualified Helpers as H
 import Hmmm.Eval
 import Hmmm.Syntax
 import Hmmm.Types
@@ -28,7 +29,11 @@ true = ELit (LBool True)
 false = ELit (LBool False)
 
 str :: String -> Expr
-str = ELit . LStr
+str = strLit
+
+-- | a string, as a value: a list of chars
+vstr :: String -> Value
+vstr = VList . map VChar
 
 v :: Name -> Expr
 v = EVar
@@ -57,7 +62,7 @@ expressionTests =
         "Expressions"
         [ testCase "int literal" $ lit 1 `evalsTo` VInt 1
         , testCase "bool literal" $ true `evalsTo` VBool True
-        , testCase "string literal" $ str "s" `evalsTo` VStr "s"
+        , testCase "string literal" $ str "s" `evalsTo` vstr "s"
         , testCase "empty list literal" $ EList [] `evalsTo` VList []
         , testCase "singleton list literal" $ EList [lit 1] `evalsTo` VList [VInt 1]
         , testCase "nested list literal" $ EList [EList [lit 1, lit 2], EList [lit 3, lit 4]] `evalsTo` VList [VList [VInt 1, VInt 2], VList [VInt 3, VInt 4]]
@@ -213,7 +218,7 @@ programTests =
                 ]
                 [VInt 10]
         , testCase "each expression produces a value, in order" $
-            runs [TEExpr (lit 1), TEExpr true, TEExpr (str "s")] [VInt 1, VBool True, VStr "s"]
+            runs [TEExpr (lit 1), TEExpr true, TEExpr (str "s")] [VInt 1, VBool True, vstr "s"]
         , testCase "definitions produce no output" $
             runs [TELet (plain "g") (lit 1), TEFun (plain "f") [plain "x"] (v "x")] []
         , testCase "definitions are in scope for later items" $
@@ -272,11 +277,65 @@ append = EOp OAppend
 ints :: [Integer] -> Value
 ints = VList . map VInt
 
+-- | a char literal
+ch :: Char -> Expr
+ch = ELit . LChar
+
 listTests :: TestTree
 listTests =
     testGroup
         "Lists"
         [ testGroup
+            "Strings"
+            [ testCase "char literal" $ ch 'a' `evalsTo` VChar 'a'
+            , testCase "a string is a list of chars" $
+                str "ab" `evalsTo` VList [VChar 'a', VChar 'b']
+            , testCase "the empty string is the empty list" $ str "" `evalsTo` VList []
+            , testCase "consing a char onto a string" $ cons (ch 'a') (str "bc") `evalsTo` vstr "abc"
+            , testCase "appending strings" $ append (str "ab") (str "cd") `evalsTo` vstr "abcd"
+            , testCase "appending the empty string" $ append (str "ab") (str "") `evalsTo` vstr "ab"
+            , testCase "char equality" $
+                truthTable OEq [(ch 'a', ch 'a', True), (ch 'a', ch 'b', False)]
+            , testCase "string equality" $
+                truthTable
+                    OEq
+                    [ (str "ab", str "ab", True)
+                    , (str "ab", str "ba", False)
+                    , (str "ab", str "abc", False)
+                    , (str "", str "", True)
+                    , (str "ab", EList [ch 'a', ch 'b'], True)
+                    ]
+            , testCase "string inequality" $
+                truthTable ONeq [(str "ab", str "ab", False), (str "ab", str "b", True)]
+            , testCase "list functions work on strings" $
+                -- let prepend (x, xs) = x ++ xs; prepend 'h' "i"
+                runs
+                    [ TEFun (plain "prepend") [plain "x", plain "xs"] (cons (v "x") (v "xs"))
+                    , TEExpr (app (v "prepend") [ch 'h', str "i"])
+                    ]
+                    [vstr "hi"]
+            ]
+        , testGroup
+            "Display"
+            [ testCase "Int" $ display H.int (VInt 1) @?= "1"
+            , testCase "Bool" $ display H.bool (VBool True) @?= "True"
+            , testCase "Char" $ display H.char (VChar 'a') @?= "'a'"
+            , testCase "a string prints as a string" $ display H.str (vstr "hi") @?= "\"hi\""
+            , testCase "the empty string prints as \"\"" $ display H.str (VList []) @?= "\"\""
+            , testCase "an empty list prints as []" $ display (H.list H.int) (VList []) @?= "[]"
+            , testCase "a polymorphic empty list prints as []" $
+                display (H.list (H.var "a")) (VList []) @?= "[]"
+            , testCase "a list of Ints" $ display (H.list H.int) (ints [1, 2]) @?= "[1, 2]"
+            , testCase "a list of chars prints as a string" $
+                display (H.list H.char) (VList [VChar 'a', VChar 'b']) @?= "\"ab\""
+            , testCase "a list of strings" $
+                display (H.list H.str) (VList [vstr "a", vstr ""]) @?= "[\"a\", \"\"]"
+            , testCase "nested lists" $
+                display (H.list (H.list H.int)) (VList [ints [1], ints []]) @?= "[[1], []]"
+            , testCase "a function prints as a lambda" $
+                display (H.int H.~> H.int) (VClosure M.empty "x" (v "x")) @?= "λx -> x"
+            ]
+        , testGroup
             "Cons (++)"
             [ testCase "1 ++ []" $ cons (lit 1) (EList []) `evalsTo` ints [1]
             , testCase "1 ++ [2, 3]" $ cons (lit 1) (EList [lit 2, lit 3]) `evalsTo` ints [1, 2, 3]
@@ -309,7 +368,7 @@ listTests =
                 -- 1 ++ [2] +++ [3]
                 cons (lit 1) (append (EList [lit 2]) (EList [lit 3])) `evalsTo` ints [1, 2, 3]
             , testCase "appending strings in lists" $
-                append (EList [str "a"]) (EList [str "b"]) `evalsTo` VList [VStr "a", VStr "b"]
+                append (EList [str "a"]) (EList [str "b"]) `evalsTo` VList [vstr "a", vstr "b"]
             ]
         , testGroup
             "Equality"
@@ -374,6 +433,6 @@ listTests =
                     , TEExpr (app (v "prepend") [lit 1, v "nil"])
                     , TEExpr (app (v "prepend") [str "a", app (v "prepend") [str "b", v "nil"]])
                     ]
-                    [ints [1], VList [VStr "a", VStr "b"]]
+                    [ints [1], VList [vstr "a", vstr "b"]]
             ]
         ]

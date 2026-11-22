@@ -40,7 +40,7 @@ run line =
             Left err -> putStrLn $ "type error:\n" ++ err
             Right t -> case runEval expr of
                 Left err -> putStrLn $ "runtime error:\n" ++ err
-                Right v -> putStrLn ("-> " ++ show v ++ " : " ++ show t)
+                Right v -> putStrLn ("-> " ++ display t v ++ " : " ++ show t)
 
 runFile :: String -> IO ()
 runFile source =
@@ -48,9 +48,9 @@ runFile source =
         Left err -> failWith $ "parse error:\n" ++ err
         Right prog -> case typeOfProgram prog of
             Left err -> failWith $ "type error:\n" ++ err
-            Right _ -> case runEvalProgram prog of
+            Right ts -> case runEvalProgram prog of
                 Left err -> failWith $ "runtime error:\n" ++ err
-                Right vs -> mapM_ print vs
+                Right vs -> mapM_ putStrLn (zipWith display ts vs)
 
 failWith :: String -> IO ()
 failWith msg = hPutStrLn stderr msg >> exitFailure

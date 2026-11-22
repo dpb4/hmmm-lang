@@ -18,7 +18,7 @@ module Hmmm.Types (
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-data ConcreteType = CInt | CBool | CStr deriving (Eq)
+data ConcreteType = CInt | CBool | CChar deriving (Eq)
 
 data TypeConstructor t
     = TCFun t t
@@ -41,7 +41,7 @@ instance Show Type where
 instance Show ConcreteType where
     show CInt = "Int"
     show CBool = "Bool"
-    show CStr = "Str"
+    show CChar = "Char"
 
 newtype TypeVar = TV String deriving (Eq, Ord)
 

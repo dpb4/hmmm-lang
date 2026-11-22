@@ -70,11 +70,13 @@ instance Show Expr where
         ELit l -> show l
         EList l -> show l
 
--- | a literal value as written in source code
+{- | a literal value as written in source code;
+string literals are parsed into lists of chars, so they have no literal of their own
+-}
 data Literal
     = LInt Integer
     | LBool Bool
-    | LStr String
+    | LChar Char
     deriving (Show, Eq)
 
 data TopExpr

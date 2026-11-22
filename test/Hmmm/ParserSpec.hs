@@ -1,6 +1,6 @@
 module Hmmm.ParserSpec (parserTests) where
 
-import Helpers (assertLeft)
+import Helpers (assertLeft, strLit)
 import Hmmm.Parser
 import Hmmm.Syntax
 import Hmmm.Types
@@ -39,11 +39,14 @@ infix 4 .:
 tInt, tBool, tStr :: Type
 tInt = T CInt
 tBool = T CBool
-tStr = T CStr
+tStr = TC (TCList (T CChar))
 
 (~>) :: Type -> Type -> Type
 a ~> r = TC (TCFun a r)
 infixr 5 ~>
+
+tChar :: Type
+tChar = T CChar
 
 tList :: Type -> Type
 tList = TC . TCList
@@ -65,7 +68,21 @@ parserTests =
             , testCase "integer (oct)" $ "0o16" `parsesTo` int 14
             , testCase "true" $ "true" `parsesTo` ELit (LBool True)
             , testCase "false" $ "false" `parsesTo` ELit (LBool False)
-            , testCase "string" $ "\"hi\"" `parsesTo` ELit (LStr "hi")
+            , testCase "string" $ "\"hi\"" `parsesTo` strLit "hi"
+            , testCase "char" $ "'a'" `parsesTo` ELit (LChar 'a')
+            , testCase "a string is a list of chars" $
+                "\"ab\"" `parsesTo` EList [ELit (LChar 'a'), ELit (LChar 'b')]
+            , testCase "a string is the same as its list of chars" $
+                runParse "\"ab\"" @?= runParse "['a', 'b']"
+            , testCase "the empty string is the empty list" $ "\"\"" `parsesTo` EList []
+            , testCase "strings with spaces" $ "\"a b\"" `parsesTo` strLit "a b"
+            , testCase "strings as list elements" $
+                "[\"a\", \"bc\"]" `parsesTo` EList [strLit "a", strLit "bc"]
+            , testCase "strings as arguments" $
+                "f \"a\" 'b'" `parsesTo` EApp (EApp (v "f") (strLit "a")) (ELit (LChar 'b'))
+            , testCase "a char with several characters fails" $ rejects "'ab'"
+            , testCase "an empty char fails" $ rejects "''"
+            , testCase "an unclosed string fails" $ rejects "\"ab"
             , testCase "variable" $ "x" `parsesTo` v "x"
             , testCase "variable starting with a keyword's first letter" $ do
                 "foo" `parsesTo` v "foo"
@@ -258,7 +275,7 @@ parserTests =
                 "let a: int = 1 in a" `parsesTo` ELet ("a" .: tInt) (int 1) (v "a")
             , testCase "let with a function type" $
                 "let f: bool -> str = \\x -> \"s\" in f"
-                    `parsesTo` ELet ("f" .: tBool ~> tStr) (EAbs (b "x") (ELit (LStr "s"))) (v "f")
+                    `parsesTo` ELet ("f" .: tBool ~> tStr) (EAbs (b "x") (strLit "s")) (v "f")
             , testCase "function types are right-associative" $
                 "let f: int -> int -> int = g in f"
                     `parsesTo` ELet ("f" .: tInt ~> (tInt ~> tInt)) (v "g") (v "f")
@@ -301,6 +318,14 @@ parserTests =
             , testCase "list types in a top-level function" $
                 "let f (xs: list int): [int] = xs"
                     `programIs` [TEFun ("f" .: tList tInt) ["xs" .: tList tInt] (v "xs")]
+            , testCase "char" $ "char" `annotates` tChar
+            , testCase "str is [char]" $ do
+                "str" `annotates` tList tChar
+                "[char]" `annotates` tList tChar
+                "list char" `annotates` tList tChar
+            , testCase "str inside other types" $ do
+                "[str]" `annotates` tList (tList tChar)
+                "str -> str" `annotates` tList tChar ~> tList tChar
             , testCase "list without an element type fails" $ rejects "let x: list = x in x"
             , testCase "empty brackets are not a type" $ rejects "let x: [] = x in x"
             , testCase "unclosed list type fails" $ rejects "let x: [int = x in x"

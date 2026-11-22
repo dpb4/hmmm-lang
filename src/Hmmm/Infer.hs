@@ -143,7 +143,7 @@ infer = \case
     ELit l -> return $ TLit $ case l of
         LInt _ -> CInt
         LBool _ -> CBool
-        LStr _ -> CStr
+        LChar _ -> CChar
     EVar name -> do
         ctx <- ask
         case M.lookup name ctx of

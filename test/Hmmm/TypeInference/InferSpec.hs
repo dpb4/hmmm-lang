@@ -21,7 +21,7 @@ exp2 :: Expr
 exp2 = ELet (Bind "foo" Nothing) fun rest
   where
     fun = EAbs (Bind "x" Nothing) (EOp OAdd (EVar "x") (ELit $ LInt 3))
-    rest = EApp (EVar "foo") (ELit $ LStr "c")
+    rest = EApp (EVar "foo") (str' "c")
 
 -- constraint generation
 
@@ -54,17 +54,17 @@ endToEndTests =
     testGroup
         "End to end"
         [ testCase "int literal" $ typeOf (ELit (LInt 1)) @?= Right int
-        , testCase "string literal" $ typeOf (ELit (LStr "s")) @?= Right str
+        , testCase "string literal" $ typeOf (str' "s") @?= Right str
         , testCase "if" $
             typeOf (EIf (ELit (LBool True)) (ELit (LInt 1)) (ELit (LInt 2))) @?= Right int
         , testCase "if with non-bool condition fails" $
             assertLeft "should fail" (typeOf (EIf (ELit (LInt 0)) (ELit (LInt 1)) (ELit (LInt 2))))
         , testCase "if with mismatched branches fails" $
-            assertLeft "should fail" (typeOf (EIf (ELit (LBool True)) (ELit (LInt 1)) (ELit (LStr "s"))))
+            assertLeft "should fail" (typeOf (EIf (ELit (LBool True)) (ELit (LInt 1)) (str' "s")))
         , testCase "addition" $
             typeOf (EOp OAdd (ELit (LInt 1)) (ELit (LInt 2))) @?= Right int
         , testCase "adding a string fails" $
-            assertLeft "should fail" (typeOf (EOp OSub (ELit (LInt 1)) (ELit (LStr "s"))))
+            assertLeft "should fail" (typeOf (EOp OSub (ELit (LInt 1)) (str' "s")))
         , testCase "identity function has type a -> a" $
             case typeOf (EAbs (Bind "x" Nothing) (EVar "x")) of
                 Right (TCon (TCFun (TVar a) (TVar b))) -> a @?= b
@@ -83,7 +83,7 @@ endToEndTests =
         , testCase "exp2: let-bound Int function applied to Str fails" $
             assertLeft "should fail" (typeOf exp2)
         , testCase "let shadowing uses the inner binding" $
-            typeOf (ELet (Bind "x" Nothing) (ELit (LInt 1)) (ELet (Bind "x" Nothing) (ELit (LStr "s")) (EVar "x")))
+            typeOf (ELet (Bind "x" Nothing) (ELit (LInt 1)) (ELet (Bind "x" Nothing) (str' "s") (EVar "x")))
                 @?= Right str
         , testCase "let is polymorphic" $
             -- let id = \x -> x in if id True then id 1 else 2
@@ -122,7 +122,7 @@ endToEndTests =
                 ( ELet
                     (Bind "const" Nothing)
                     (EAbs (Bind "a" Nothing) (EAbs (Bind "b" Nothing) (EVar "a")))
-                    (EApp (EApp (EVar "const") (ELit (LInt 1))) (ELit (LStr "s")))
+                    (EApp (EApp (EVar "const") (ELit (LInt 1))) (str' "s"))
                 )
                 @?= Right int
         , testCase "solved let constraints reach the outer context" $
@@ -238,7 +238,7 @@ plain n = Bind n Nothing
 aInt, aBool, aStr :: Type
 aInt = T CInt
 aBool = T CBool
-aStr = T CStr
+aStr = TC (TCList (T CChar))
 
 (-->) :: Type -> Type -> Type
 x --> y = TC (TCFun x y)
@@ -337,7 +337,7 @@ annotationTests =
 -- whole programs
 
 str' :: String -> Expr
-str' = ELit . LStr
+str' = strLit
 
 app :: Expr -> [Expr] -> Expr
 app = foldl EApp
@@ -480,11 +480,57 @@ isPolyList t = case t of
 fails :: Expr -> Assertion
 fails e = assertLeft (show e ++ " should fail") (typeOf e)
 
+-- | a char literal
+ch :: Char -> Expr
+ch = ELit . LChar
+
 listTests :: TestTree
 listTests =
     testGroup
         "Lists"
         [ testGroup
+            "Strings"
+            [ testCase "a char literal is a Char" $ typeOf (ch 'a') @?= Right char
+            , testCase "a string literal is a List Char" $ typeOf (str' "ab") @?= Right (list char)
+            , testCase "the empty string is the empty list, so it is polymorphic" $
+                isPolyList (typeOf (str' ""))
+            , testCase "consing a char onto a string" $
+                typeOf (cons (ch 'a') (str' "bc")) @?= Right str
+            , testCase "consing a char onto the empty string" $
+                typeOf (cons (ch 'a') (str' "")) @?= Right str
+            , testCase "appending strings" $ typeOf (append (str' "a") (str' "b")) @?= Right str
+            , testCase "a string and a list of chars are the same type" $
+                typeOf (EOp OEq (str' "ab") (EList [ch 'a', ch 'b'])) @?= Right bool
+            , testCase "a list of strings" $
+                typeOf (EList [str' "a", str' "bc"]) @?= Right (list str)
+            , testCase "consing an Int onto a string fails" $ fails (cons (lit 1) (str' "bc"))
+            , testCase "appending a string and a list of Ints fails" $
+                fails (append (str' "a") (EList [lit 1]))
+            , testCase "a char is not a string" $ fails (EOp OEq (ch 'a') (str' "a"))
+            , testCase "a char is not an Int" $ fails (EOp OAdd (ch 'a') (lit 1))
+            , testCase "list functions work on strings" $
+                -- let prepend = \x -> \xs -> x ++ xs in prepend 'a' "b"
+                typeOf
+                    ( ELet
+                        (plain "prepend")
+                        (lam "x" (lam "xs" (cons (EVar "x") (EVar "xs"))))
+                        (app (EVar "prepend") [ch 'a', str' "b"])
+                    )
+                    @?= Right str
+            , testCase "a str annotation accepts a list of chars" $
+                -- let s: str = ['a'] in s
+                typeOf (ELet ("s" .: aStr) (EList [ch 'a']) (EVar "s")) @?= Right str
+            , testCase "a str annotation fixes the empty string's type" $
+                -- let s: str = "" in s
+                typeOf (ELet ("s" .: aStr) (str' "") (EVar "s")) @?= Right str
+            , testCase "a str annotation rejects other lists" $
+                -- let s: str = [1] in s
+                fails (ELet ("s" .: aStr) (EList [lit 1]) (EVar "s"))
+            , testCase "a str parameter can be consed onto" $
+                -- \(s: str) -> 'x' ++ s  :  List Char -> List Char
+                typeOf (EAbs ("s" .: aStr) (cons (ch 'x') (EVar "s"))) @?= Right (str ~> str)
+            ]
+        , testGroup
             "Literals"
             [ testCase "[1, 2]  :  List Int" $ typeOf (EList [lit 1, lit 2]) @?= Right (list int)
             , testCase "[\"a\"]  :  List Str" $ typeOf (EList [str' "a"]) @?= Right (list str)
