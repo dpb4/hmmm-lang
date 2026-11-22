@@ -7,8 +7,10 @@ module Hmmm.Eval (
     Value (..),
 ) where
 
+import Control.Monad (zipWithM)
 import Control.Monad.Except
 import Control.Monad.Reader
+import Data.List
 import qualified Data.Map as M
 import Hmmm.Syntax
 
@@ -19,6 +21,7 @@ data Value
     | VBool Bool
     | VStr String
     | VClosure Env Name Expr
+    | VList (List Value)
     deriving (Eq)
 
 instance Show Value where
@@ -26,6 +29,7 @@ instance Show Value where
     show (VBool i) = show i
     show (VStr i) = show i
     show (VClosure _ p b) = "λ" ++ p ++ " -> " ++ show b
+    show (VList l) = show l
 
 type Eval a = ReaderT Env (Except String) a
 
@@ -55,6 +59,10 @@ eval = \case
     EApp f a -> evalApp f a
     EOp o a b -> evalOp o a b
     ELit l -> evalLit l
+    EList es -> evalList es
+
+evalList :: (List Expr) -> Eval Value
+evalList es = traverse eval es >>= (return . VList)
 
 evalVar :: Name -> Eval Value
 evalVar n = asks (M.lookup n) >>= maybe err return
@@ -101,6 +109,8 @@ evalOp o ae be = do
                     OGeq -> evalOpGeq a b
                     OLt -> evalOpLt a b
                     OLeq -> evalOpLeq a b
+                    OCons -> evalOpCons a b
+                    OAppend -> evalOpAppend a b
         )
 
 evalOpAdd :: Value -> Value -> Eval Value
@@ -115,13 +125,20 @@ evalOpEq :: Value -> Value -> Eval Value
 evalOpEq (VInt a) (VInt b) = return $ VBool (a == b)
 evalOpEq (VBool a) (VBool b) = return $ VBool (a == b)
 evalOpEq (VStr a) (VStr b) = return $ VBool (a == b)
+-- lists are equal if they have the same length and each pair of elements is equal
+evalOpEq (VList a) (VList b)
+    | length a /= length b = return $ VBool False
+    | otherwise = VBool . and <$> zipWithM (\x y -> isTrue <$> evalOpEq x y) a b
+  where
+    isTrue = (== VBool True)
+-- two functions are never equal, even if they are the same closure
+evalOpEq (VClosure {}) (VClosure {}) = return $ VBool False
 evalOpEq _ _ = return $ VBool False
 
 evalOpNeq :: Value -> Value -> Eval Value
-evalOpNeq (VInt a) (VInt b) = return $ VBool (a /= b)
-evalOpNeq (VBool a) (VBool b) = return $ VBool (a /= b)
-evalOpNeq (VStr a) (VStr b) = return $ VBool (a /= b)
-evalOpNeq _ _ = return $ VBool True
+evalOpNeq a b = evalOpEq a b >>= \case
+    VBool eq -> return $ VBool (not eq)
+    v -> throwError ("(==) returned a non-bool " ++ show v)
 
 evalOpGt :: Value -> Value -> Eval Value
 evalOpGt (VInt a) (VInt b) = return $ VBool (a > b)
@@ -138,6 +155,14 @@ evalOpLt x y = throwError ("(<) requires two integers (got " ++ show x ++ ", " +
 evalOpLeq :: Value -> Value -> Eval Value
 evalOpLeq (VInt a) (VInt b) = return $ VBool (a <= b)
 evalOpLeq x y = throwError ("(<=) requires two integers (got " ++ show x ++ ", " ++ show y ++ ")")
+
+evalOpCons :: Value -> Value -> Eval Value
+evalOpCons e (VList l) = return $ VList (e : l)
+evalOpCons x y = throwError ("(++) requires an element and a list (got " ++ show x ++ ", " ++ show y ++ ")")
+
+evalOpAppend :: Value -> Value -> Eval Value
+evalOpAppend (VList l) (VList r) = return $ VList (l ++ r)
+evalOpAppend x y = throwError ("(+++) requires two lists (got " ++ show x ++ ", " ++ show y ++ ")")
 
 evalOpAnd :: Expr -> Expr -> Eval Value
 evalOpAnd a b = do

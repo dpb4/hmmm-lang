@@ -58,6 +58,9 @@ expressionTests =
         [ testCase "int literal" $ lit 1 `evalsTo` VInt 1
         , testCase "bool literal" $ true `evalsTo` VBool True
         , testCase "string literal" $ str "s" `evalsTo` VStr "s"
+        , testCase "empty list literal" $ EList [] `evalsTo` VList []
+        , testCase "singleton list literal" $ EList [lit 1] `evalsTo` VList [VInt 1]
+        , testCase "nested list literal" $ EList [EList [lit 1, lit 2], EList [lit 3, lit 4]] `evalsTo` VList [VList [VInt 1, VInt 2], VList [VInt 3, VInt 4]]
         , testCase "addition" $ add (lit 1) (lit 2) `evalsTo` VInt 3
         , testCase "subtraction is left associative" $
             add (sub (lit 1) (lit 2)) (lit 3) `evalsTo` VInt 2
@@ -92,6 +95,7 @@ expressionTests =
             -- let x = 1 in (\x -> x) 2 + x
             ELet (plain "x") (lit 1) (add (EApp (lam "x" (v "x")) (lit 2)) (v "x")) `evalsTo` VInt 3
         , operatorTests
+        , listTests
         , testGroup
             "Runtime errors (for programs that skip type checking)"
             [ testCase "unbound variable" $ fails (v "x")
@@ -102,6 +106,10 @@ expressionTests =
                 mapM_ (\o -> fails (EOp o (str "a") (str "b"))) [OGt, OGeq, OLt, OLeq]
             , testCase "and/or on non-bools" $
                 mapM_ (\o -> fails (EOp o (lit 1) (lit 0))) [OAnd, OOr]
+            , testCase "cons onto a non-list" $ fails (cons (lit 1) (lit 2))
+            , testCase "append with a non-list" $ do
+                fails (append (lit 1) (EList [lit 2]))
+                fails (append (EList [lit 1]) (lit 2))
             ]
         ]
 
@@ -181,6 +189,12 @@ operatorTests =
                 (lit 5)
                 (EIf (EOp OAnd (EOp OGt (v "x") (lit 0)) (EOp OLt (v "x") (lit 10))) (v "x") (lit 0))
                 `evalsTo` VInt 5
+        , testCase "two lambdas are never equal" $ do
+            EOp OEq (lam "x" (v "x")) (lam "x" (v "x")) `evalsTo` VBool False
+            EOp ONeq (lam "x" (v "x")) (lam "x" (v "x")) `evalsTo` VBool True
+        , testCase "a function is not equal to itself" $
+            -- let f = \x -> x in f == f
+            ELet (plain "f") (lam "x" (v "x")) (EOp OEq (v "f") (v "f")) `evalsTo` VBool False
         , testCase "comparing a function's result" $
             -- (\x -> x + 1) 1 == 2
             EOp OEq (EApp (lam "x" (add (v "x") (lit 1))) (lit 1)) (lit 2) `evalsTo` VBool True
@@ -248,4 +262,118 @@ programTests =
             assertLeft "should fail" $
                 runEvalProgram [TEExpr (v "g"), TELet (plain "g") (lit 1)]
         , testCase "an empty program produces nothing" $ runs [] []
+        ]
+
+cons, append :: Expr -> Expr -> Expr
+cons = EOp OCons
+append = EOp OAppend
+
+-- | a list of ints, as a value
+ints :: [Integer] -> Value
+ints = VList . map VInt
+
+listTests :: TestTree
+listTests =
+    testGroup
+        "Lists"
+        [ testGroup
+            "Cons (++)"
+            [ testCase "1 ++ []" $ cons (lit 1) (EList []) `evalsTo` ints [1]
+            , testCase "1 ++ [2, 3]" $ cons (lit 1) (EList [lit 2, lit 3]) `evalsTo` ints [1, 2, 3]
+            , testCase "1 ++ 2 ++ []" $ cons (lit 1) (cons (lit 2) (EList [])) `evalsTo` ints [1, 2]
+            , testCase "consing a list onto a list of lists" $
+                cons (EList [lit 1]) (EList [EList [lit 2]]) `evalsTo` VList [ints [1], ints [2]]
+            , testCase "operands are evaluated first" $
+                -- 1 + 1 ++ [x] where x = 3
+                ELet (plain "x") (lit 3) (cons (add (lit 1) (lit 1)) (EList [v "x"]))
+                    `evalsTo` ints [2, 3]
+            , testCase "cons does not change the original list" $
+                -- let xs = [2] in [1 ++ xs, xs]
+                ELet (plain "xs") (EList [lit 2]) (EList [cons (lit 1) (v "xs"), v "xs"])
+                    `evalsTo` VList [ints [1, 2], ints [2]]
+            ]
+        , testGroup
+            "Append (+++)"
+            [ testCase "[1] +++ [2, 3]" $
+                append (EList [lit 1]) (EList [lit 2, lit 3]) `evalsTo` ints [1, 2, 3]
+            , testCase "[] +++ []" $ append (EList []) (EList []) `evalsTo` VList []
+            , testCase "[] is a left identity" $ append (EList []) (EList [lit 1]) `evalsTo` ints [1]
+            , testCase "[] is a right identity" $ append (EList [lit 1]) (EList []) `evalsTo` ints [1]
+            , testCase "order is preserved" $
+                append (EList [lit 3, lit 1]) (EList [lit 2]) `evalsTo` ints [3, 1, 2]
+            , testCase "append is associative" $ do
+                let (a, b, c) = (EList [lit 1], EList [lit 2], EList [lit 3])
+                append (append a b) c `evalsTo` ints [1, 2, 3]
+                append a (append b c) `evalsTo` ints [1, 2, 3]
+            , testCase "cons and append combine" $
+                -- 1 ++ [2] +++ [3]
+                cons (lit 1) (append (EList [lit 2]) (EList [lit 3])) `evalsTo` ints [1, 2, 3]
+            , testCase "appending strings in lists" $
+                append (EList [str "a"]) (EList [str "b"]) `evalsTo` VList [VStr "a", VStr "b"]
+            ]
+        , testGroup
+            "Equality"
+            [ testCase "== on lists" $
+                truthTable
+                    OEq
+                    [ (EList [lit 1, lit 2], EList [lit 1, lit 2], True)
+                    , (EList [lit 1, lit 2], EList [lit 2, lit 1], False)
+                    , (EList [lit 1], EList [lit 1, lit 2], False)
+                    , (EList [], EList [], True)
+                    , (cons (lit 1) (EList []), EList [lit 1], True)
+                    ]
+            , testCase "/= on lists" $
+                truthTable
+                    ONeq
+                    [ (EList [lit 1, lit 2], EList [lit 1, lit 2], False)
+                    , (EList [lit 1, lit 2], EList [lit 2, lit 1], True)
+                    , (EList [lit 1], EList [lit 1, lit 2], True)
+                    , (EList [], EList [], False)
+                    , (append (EList [lit 1]) (EList [lit 2]), EList [lit 1, lit 2], False)
+                    ]
+            ]
+        , testGroup
+            "Element-wise equality"
+            [ testCase "nested lists are compared element by element" $ do
+                EOp OEq (EList [EList [lit 1], EList [lit 2]]) (EList [EList [lit 1], EList [lit 2]])
+                    `evalsTo` VBool True
+                EOp OEq (EList [EList [lit 1], EList [lit 2]]) (EList [EList [lit 1], EList [lit 3]])
+                    `evalsTo` VBool False
+            , testCase "a prefix is not equal" $ do
+                EOp OEq (EList [lit 1]) (EList [lit 1, lit 2]) `evalsTo` VBool False
+                EOp OEq (EList [lit 1, lit 2]) (EList [lit 1]) `evalsTo` VBool False
+            , testCase "lists of functions are never equal" $
+                -- let f = \x -> x in [f] == [f]
+                ELet (plain "f") (lam "x" (v "x")) (EOp OEq (EList [v "f"]) (EList [v "f"]))
+                    `evalsTo` VBool False
+            , testCase "lists of functions are always unequal" $
+                -- let f = \x -> x in [f] /= [f]
+                ELet (plain "f") (lam "x" (v "x")) (EOp ONeq (EList [v "f"]) (EList [v "f"]))
+                    `evalsTo` VBool True
+            , testCase "empty lists of functions are equal" $
+                -- [] == [] even if they would hold functions
+                EOp OEq (EList []) (EList []) `evalsTo` VBool True
+            ]
+        , testGroup
+            "Functions over lists"
+            [ testCase "a lambda that conses" $
+                -- (\xs -> 0 ++ xs) [1]
+                EApp (lam "xs" (cons (lit 0) (v "xs"))) (EList [lit 1]) `evalsTo` ints [0, 1]
+            , testCase "elements can be function applications" $
+                -- let inc = \x -> x + 1 in [inc 1, inc 2]
+                ELet
+                    (plain "inc")
+                    (lam "x" (add (v "x") (lit 1)))
+                    (EList [EApp (v "inc") (lit 1), EApp (v "inc") (lit 2)])
+                    `evalsTo` ints [2, 3]
+            , testCase "top-level list functions" $
+                -- let prepend (x, xs) = x ++ xs; let nil = []; prepend 1 nil; prepend "a" (prepend "b" nil)
+                runs
+                    [ TEFun (plain "prepend") [plain "x", plain "xs"] (cons (v "x") (v "xs"))
+                    , TELet (plain "nil") (EList [])
+                    , TEExpr (app (v "prepend") [lit 1, v "nil"])
+                    , TEExpr (app (v "prepend") [str "a", app (v "prepend") [str "b", v "nil"]])
+                    ]
+                    [ints [1], VList [VStr "a", VStr "b"]]
+            ]
         ]

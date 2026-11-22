@@ -6,6 +6,7 @@ module Helpers (
     bool,
     str,
     (~>),
+    list,
     assertLeft,
 ) where
 
@@ -28,6 +29,9 @@ str = TLit CStr
 (~>) :: TypeMaybe -> TypeMaybe -> TypeMaybe
 (~>) a b = TCon $ TCFun a b
 infixr 5 ~>
+
+list :: TypeMaybe -> TypeMaybe
+list = TCon . TCList
 
 assertLeft :: (Show b) => String -> Either a b -> Assertion
 assertLeft msg e = assertBool (msg ++ ", got " ++ either (const "Left") show e) (isLeft e)

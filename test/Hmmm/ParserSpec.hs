@@ -45,6 +45,15 @@ tStr = T CStr
 a ~> r = TC (TCFun a r)
 infixr 5 ~>
 
+tList :: Type -> Type
+tList = TC . TCList
+
+-- | the type annotation of @let x: <ann> = x in x@
+annotates :: String -> Type -> Assertion
+annotates ann t = ("let x: " ++ ann ++ " = x in x") `parsesTo` ELet ("x" .: t) (v "x") (v "x")
+
+infix 1 `annotates`
+
 parserTests :: TestTree
 parserTests =
     testGroup
@@ -105,7 +114,7 @@ parserTests =
                 "1<=2" `parsesTo` EOp OLeq (int 1) (int 2)
                 "1>=2" `parsesTo` EOp OGeq (int 1) (int 2)
             , testCase "= is not ==" $ rejects "1 = 2"
-            , testCase "unknown operator fails" $ rejects "1 ++ 2"
+            , testCase "unknown operator fails" $ rejects "1 * 2"
             , testCase "arithmetic binds tighter than comparison" $
                 "1 + 2 == 3 - 4"
                     `parsesTo` EOp OEq (EOp OAdd (int 1) (int 2)) (EOp OSub (int 3) (int 4))
@@ -141,6 +150,50 @@ parserTests =
             , testCase "variables may start with and/or" $
                 "andy orc" `parsesTo` EApp (v "andy") (v "orc")
             , testCase "dangling and fails" $ rejects "a and"
+            , testCase "cons" $ "1 ++ xs" `parsesTo` EOp OCons (int 1) (v "xs")
+            , testCase "append" $ "xs +++ ys" `parsesTo` EOp OAppend (v "xs") (v "ys")
+            , testCase "cons is right associative" $
+                "1 ++ 2 ++ []" `parsesTo` EOp OCons (int 1) (EOp OCons (int 2) (EList []))
+            , testCase "append is right associative" $
+                "a +++ b +++ c" `parsesTo` EOp OAppend (v "a") (EOp OAppend (v "b") (v "c"))
+            , testCase "cons and append mix" $
+                "1 ++ a +++ b" `parsesTo` EOp OCons (int 1) (EOp OAppend (v "a") (v "b"))
+            , testCase "+, ++ and +++ are distinct" $
+                "1+2++a+++b"
+                    `parsesTo` EOp OCons (EOp OAdd (int 1) (int 2)) (EOp OAppend (v "a") (v "b"))
+            , testCase "arithmetic binds tighter than cons" $
+                "x + 1 ++ xs" `parsesTo` EOp OCons (EOp OAdd (v "x") (int 1)) (v "xs")
+            , testCase "cons binds tighter than comparison" $
+                "1 ++ xs == ys" `parsesTo` EOp OEq (EOp OCons (int 1) (v "xs")) (v "ys")
+            ]
+        , testGroup
+            "Lists"
+            [ testCase "empty list" $ "[]" `parsesTo` EList []
+            , testCase "empty list with whitespace" $ "[ ]" `parsesTo` EList []
+            , testCase "singleton" $ "[1]" `parsesTo` EList [int 1]
+            , testCase "several elements" $ "[1, 2, 3]" `parsesTo` EList [int 1, int 2, int 3]
+            , testCase "no whitespace" $ "[1,2]" `parsesTo` EList [int 1, int 2]
+            , testCase "elements are full expressions" $
+                "[f 1, a, b]" `parsesTo` EList [EApp (v "f") (int 1), v "a", v "b"]
+            , testCase "elements with operators, lambdas and ifs" $
+                "[1 + 2, \\x -> x, if c then 1 else 2]"
+                    `parsesTo` EList
+                        [ EOp OAdd (int 1) (int 2)
+                        , EAbs (b "x") (v "x")
+                        , EIf (v "c") (int 1) (int 2)
+                        ]
+            , testCase "nested" $
+                "[[1], [], [2, 3]]" `parsesTo` EList [EList [int 1], EList [], EList [int 2, int 3]]
+            , testCase "a list is an application argument" $
+                "f [1] x" `parsesTo` EApp (EApp (v "f") (EList [int 1])) (v "x")
+            , testCase "a list in a let" $
+                "let xs = [1] in xs" `parsesTo` ELet (b "xs") (EList [int 1]) (v "xs")
+            , testCase "multi-line list" $ "[ 1\n  , 2\n  ]" `parsesTo` EList [int 1, int 2]
+            , testCase "unclosed list fails" $ rejects "[1, 2"
+            , testCase "trailing comma fails" $ rejects "[1, 2,]"
+            , testCase "leading comma fails" $ rejects "[, 1]"
+            , testCase "missing comma fails" $ rejects "[1 2 3,]"
+            , testCase "lone comma fails" $ rejects "[,]"
             ]
         , testGroup
             "Application"
@@ -221,6 +274,37 @@ parserTests =
             , testCase "unparenthesized annotated lambda fails" $ rejects "\\x: int -> x"
             , testCase "type names are still valid variables" $
                 "int bool" `parsesTo` EApp (v "int") (v "bool")
+            , testCase "list is still a valid variable" $ "list" `parsesTo` v "list"
+            ]
+        , testGroup
+            "List types"
+            [ testCase "[T]" $ "[int]" `annotates` tList tInt
+            , testCase "list T" $ "list int" `annotates` tList tInt
+            , testCase "both spellings are the same type" $ do
+                "[bool]" `annotates` tList tBool
+                "list bool" `annotates` tList tBool
+            , testCase "nested [[T]]" $ "[[str]]" `annotates` tList (tList tStr)
+            , testCase "nested list list T" $ "list list str" `annotates` tList (tList tStr)
+            , testCase "the spellings can be mixed" $ do
+                "list [int]" `annotates` tList (tList tInt)
+                "[list int]" `annotates` tList (tList tInt)
+            , testCase "list binds tighter than ->" $
+                "list int -> bool" `annotates` tList tInt ~> tBool
+            , testCase "list of functions needs parentheses" $
+                "list (int -> bool)" `annotates` tList (tInt ~> tBool)
+            , testCase "brackets delimit a function type" $
+                "[int -> bool]" `annotates` tList (tInt ~> tBool)
+            , testCase "function returning a list" $
+                "int -> [int]" `annotates` tInt ~> tList tInt
+            , testCase "list types on lambda parameters" $
+                "\\(xs: [int]) -> xs" `parsesTo` EAbs ("xs" .: tList tInt) (v "xs")
+            , testCase "list types in a top-level function" $
+                "let f (xs: list int): [int] = xs"
+                    `programIs` [TEFun ("f" .: tList tInt) ["xs" .: tList tInt] (v "xs")]
+            , testCase "list without an element type fails" $ rejects "let x: list = x in x"
+            , testCase "empty brackets are not a type" $ rejects "let x: [] = x in x"
+            , testCase "unclosed list type fails" $ rejects "let x: [int = x in x"
+            , testCase "list type of an unknown type fails" $ rejects "let x: [float] = x in x"
             ]
         , testGroup
             "Top level"

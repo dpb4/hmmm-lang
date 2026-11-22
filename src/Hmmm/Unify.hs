@@ -21,6 +21,8 @@ unify (TCon t1) (TCon t2) = case (t1, t2) of
         ins <- unify in1 in2
         outs <- unify (applySubst ins out1) (applySubst ins out2)
         return $ compose outs ins
+    ((TCList a), (TCList b)) -> unify a b
+    (a, b) -> throwError $ "function/list mismatch " ++ show a ++ " and " ++ show b
 unify x y = throwError $ "misc type mismatch " ++ show x ++ " and " ++ show y
 
 bind :: TypeVar -> TypeMaybe -> Solve Subst

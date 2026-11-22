@@ -63,8 +63,13 @@ fresh = do
     modify (+ 1)
     return . TVar . TV $ show count
 
+-- | helper for making fn types
 tfun :: TypeMaybe -> TypeMaybe -> TypeMaybe
 tfun a b = TCon $ TCFun a b
+
+-- | helper for making list types
+tlist :: TypeMaybe -> TypeMaybe
+tlist e = TCon $ TCList e
 
 inferBinding :: Binding -> Infer (Name, TypeMaybe)
 inferBinding (Bind n mt) = case mt of
@@ -109,16 +114,28 @@ inferOp = \case
     OLeq -> intIntToBool
     OAnd -> boolBoolToBool
     OOr -> boolBoolToBool
+    OCons -> do
+        a <- fresh
+        return $ tfun a $ tfun (tlist a) (tlist a)
+    OAppend -> do
+        a <- fresh
+        return $ tfun (tlist a) $ tfun (tlist a) (tlist a)
   where
     int = TLit CInt
     bool = TLit CBool
     intIntToInt = return $ tfun int $ tfun int int
     intIntToBool = return $ tfun int $ tfun int bool
     boolBoolToBool = return $ tfun bool $ tfun bool bool
-    -- both sides of an equality must have the same type
     aaToBool = do
         a <- fresh
         return $ tfun a $ tfun a bool
+
+inferList :: [Expr] -> Infer TypeMaybe
+inferList l = do
+    lt <- fresh
+    ets <- traverse infer l
+    traverse_ (constrain lt) ets
+    return $ tlist lt
 
 -- | infer the type of an expression
 infer :: Expr -> Infer TypeMaybe
@@ -161,6 +178,7 @@ infer = \case
         rett <- fresh
         constrain opt $ tfun at $ tfun bt rett
         return rett
+    EList l -> inferList l
 
 runInfer :: Expr -> Either String (TypeMaybe, FreeVarCount, [Constraint])
 runInfer i = runIdentity $ runExceptT $ runRWST (infer i) M.empty 0

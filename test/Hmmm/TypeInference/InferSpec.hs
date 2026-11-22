@@ -38,6 +38,9 @@ inferTests =
         , testCase "if produces condition and branch constraints" $
             fmap constraintCount (runInfer (EIf (ELit (LBool True)) (ELit (LInt 1)) (ELit (LInt 2))))
                 @?= Right 2
+        , testCase "list produces constraint per element" $
+            fmap constraintCount (runInfer (EList [(ELit (LInt 2)), (ELit (LInt 1)), (ELit (LInt 3))]))
+                @?= Right 3
         , testCase "undefined variable is an error" $
             assertLeft "should fail" (fmap constraintCount (runInfer (EVar "x")))
         ]
@@ -66,6 +69,12 @@ endToEndTests =
             case typeOf (EAbs (Bind "x" Nothing) (EVar "x")) of
                 Right (TCon (TCFun (TVar a) (TVar b))) -> a @?= b
                 other -> assertFailure $ "expected a -> a, got " ++ show other
+        , testCase "empty list has type List a" $
+            case typeOf (EList []) of
+                Right (TCon (TCList (TVar a))) -> a @?= a -- TODO hacky
+                other -> assertFailure $ "expected a -> a, got " ++ show other
+        , testCase "list with mismatched elements fails" $
+            assertLeft "should fail" (typeOf (EList [ELit $ LInt 2, ELit $ LBool False]))
         , testCase "lambda using addition is Int -> Int" $
             typeOf (EAbs (Bind "x" Nothing) (EOp OAdd (EVar "x") (ELit (LInt 1)))) @?= Right (int ~> int)
         , testCase "application" $
@@ -131,6 +140,7 @@ endToEndTests =
             typeOf (EAbs (Bind "f" Nothing) (EOp OAdd (EApp (EVar "f") (ELit (LInt 1))) (ELit (LInt 2))))
                 @?= Right ((int ~> int) ~> int)
         , operatorTests
+        , listTests
         ]
 
 operatorTests :: TestTree
@@ -217,6 +227,7 @@ operatorTests =
 -- | an annotated binding
 (.:) :: Name -> Type -> Binding
 n .: t = Bind n (Just t)
+
 infix 4 .:
 
 -- | an unannotated binding
@@ -295,6 +306,13 @@ annotationTests =
                 -- let id: int -> int = \x -> x in id 1
                 typeOf (ELet ("id" .: aInt --> aInt) (EAbs (plain "x") (EVar "x")) (EApp (EVar "id") (lit 1)))
                     @?= Right int
+            , testCase "annotated empty list is not polymorphic" $
+                -- let id: List int = [] in id
+                typeOf (ELet ("id" .: (TC $ TCList aInt)) (EList []) (EVar "id"))
+                    @?= Right (TCon $ TCList int)
+            , testCase "annotated singleton list fails for wrong element" $
+                -- let id: List int = [] in id
+                assertLeft "id was annoted List int, so List bool should fail" (typeOf (ELet ("id" .: (TC $ TCList aInt)) (EList [true]) (EVar "id")))
             , testCase "the body sees the annotated type" $
                 -- let id: bool -> bool = \x -> x in id  :  Bool -> Bool
                 typeOf (ELet ("id" .: aBool --> aBool) (EAbs (plain "x") (EVar "x")) (EVar "id"))
@@ -441,5 +459,202 @@ programTests =
             , testCase "value annotation is enforced" $
                 assertLeft "should fail" $
                     typeOfProgram [TELet ("g" .: aStr) (lit 1)]
+            ]
+        ]
+
+-- lists
+
+cons, append :: Expr -> Expr -> Expr
+cons = EOp OCons
+append = EOp OAppend
+
+lam :: Name -> Expr -> Expr
+lam = EAbs . plain
+
+-- | a type of the form List a, for some type variable a
+isPolyList :: Either String TypeMaybe -> Assertion
+isPolyList t = case t of
+    Right (TCon (TCList (TVar _))) -> return ()
+    other -> assertFailure $ "expected List a, got " ++ show other
+
+fails :: Expr -> Assertion
+fails e = assertLeft (show e ++ " should fail") (typeOf e)
+
+listTests :: TestTree
+listTests =
+    testGroup
+        "Lists"
+        [ testGroup
+            "Literals"
+            [ testCase "[1, 2]  :  List Int" $ typeOf (EList [lit 1, lit 2]) @?= Right (list int)
+            , testCase "[\"a\"]  :  List Str" $ typeOf (EList [str' "a"]) @?= Right (list str)
+            , testCase "nested lists" $
+                typeOf (EList [EList [lit 1], EList [lit 2, lit 3]]) @?= Right (list (list int))
+            , testCase "an empty inner list takes its siblings' type" $
+                typeOf (EList [EList [lit 1], EList []]) @?= Right (list (list int))
+            , testCase "a list of empty lists is polymorphic in the inner element" $
+                case typeOf (EList [EList [], EList []]) of
+                    Right (TCon (TCList (TCon (TCList (TVar _))))) -> return ()
+                    other -> assertFailure $ "expected List (List a), got " ++ show other
+            , testCase "mismatched nested lists fail" $ fails (EList [EList [lit 1], EList [true]])
+            , testCase "a list and a non-list element fail" $ fails (EList [EList [lit 1], lit 2])
+            , testCase "an element determines a variable's type" $
+                -- \x -> [x, 1]  :  Int -> List Int
+                typeOf (lam "x" (EList [EVar "x", lit 1])) @?= Right (int ~> list int)
+            , testCase "singleton of a variable" $
+                -- \x -> [x]  :  a -> List a
+                case typeOf (lam "x" (EList [EVar "x"])) of
+                    Right (TCon (TCFun (TVar a) (TCon (TCList (TVar a'))))) -> a @?= a'
+                    other -> assertFailure $ "expected a -> List a, got " ++ show other
+            , testCase "list of functions" $
+                -- [\x -> x + 1, \y -> y]  :  List (Int -> Int)
+                typeOf (EList [lam "x" (EOp OAdd (EVar "x") (lit 1)), lam "y" (EVar "y")])
+                    @?= Right (list (int ~> int))
+            , testCase "list elements are checked against a function's parameter" $
+                -- (\x -> x + 1) applied in [f 1, true] fails
+                fails (EList [EApp (lam "x" (EOp OAdd (EVar "x") (lit 1))) (lit 1), true])
+            , testCase "lists can be compared with ==" $
+                typeOf (EOp OEq (EList [lit 1]) (EList [])) @?= Right bool
+            , testCase "lists of different types cannot be compared" $
+                fails (EOp OEq (EList [lit 1]) (EList [true]))
+            , testCase "a list is not an Int" $ fails (EOp OAdd (EList [lit 1]) (lit 1))
+            ]
+        , testGroup
+            "Cons (++)"
+            [ testCase "1 ++ []  :  List Int" $ typeOf (cons (lit 1) (EList [])) @?= Right (list int)
+            , testCase "1 ++ [2]  :  List Int" $ typeOf (cons (lit 1) (EList [lit 2])) @?= Right (list int)
+            , testCase "1 ++ 2 ++ []  :  List Int" $
+                typeOf (cons (lit 1) (cons (lit 2) (EList []))) @?= Right (list int)
+            , testCase "consing a list onto a list of lists" $
+                typeOf (cons (EList [lit 1]) (EList [])) @?= Right (list (list int))
+            , testCase "element type must match the list" $ fails (cons true (EList [lit 1]))
+            , testCase "the right side must be a list" $ fails (cons (lit 1) (lit 2))
+            , testCase "list ++ list is not append" $ fails (cons (EList [lit 1]) (EList [lit 2]))
+            , testCase "cons infers both argument types" $
+                -- \x -> \xs -> x ++ xs  :  a -> List a -> List a
+                case typeOf (lam "x" (lam "xs" (cons (EVar "x") (EVar "xs")))) of
+                    Right (TCon (TCFun (TVar a) (TCon (TCFun (TCon (TCList (TVar a'))) (TCon (TCList (TVar a''))))))) -> do
+                        a @?= a'
+                        a' @?= a''
+                    other -> assertFailure $ "expected a -> List a -> List a, got " ++ show other
+            , testCase "consing an Int fixes the list type" $
+                -- \xs -> 1 ++ xs  :  List Int -> List Int
+                typeOf (lam "xs" (cons (lit 1) (EVar "xs"))) @?= Right (list int ~> list int)
+            , testCase "each use of ++ gets its own type variable" $
+                -- [1 ++ []] == [1 ++ []] and true ++ [] == [true]
+                typeOf
+                    ( EOp
+                        OAnd
+                        (EOp OEq (EList [cons (lit 1) (EList [])]) (EList []))
+                        (EOp OEq (cons true (EList [])) (EList [true]))
+                    )
+                    @?= Right bool
+            ]
+        , testGroup
+            "Append (+++)"
+            [ testCase "[1] +++ [2]  :  List Int" $
+                typeOf (append (EList [lit 1]) (EList [lit 2])) @?= Right (list int)
+            , testCase "[] +++ []  :  List a" $ isPolyList (typeOf (append (EList []) (EList [])))
+            , testCase "[] +++ [1]  :  List Int" $ typeOf (append (EList []) (EList [lit 1])) @?= Right (list int)
+            , testCase "element types must match" $ fails (append (EList [lit 1]) (EList [true]))
+            , testCase "the left side must be a list" $ fails (append (lit 1) (EList [lit 2]))
+            , testCase "the right side must be a list" $ fails (append (EList [lit 1]) (lit 2))
+            , testCase "append infers a list parameter" $
+                -- \xs -> xs +++ [1]  :  List Int -> List Int
+                typeOf (lam "xs" (append (EVar "xs") (EList [lit 1]))) @?= Right (list int ~> list int)
+            , testCase "cons and append combine" $
+                -- 1 ++ [2] +++ [3]
+                typeOf (cons (lit 1) (append (EList [lit 2]) (EList [lit 3]))) @?= Right (list int)
+            ]
+        , testGroup
+            "Polymorphism"
+            [ testCase "a let-bound empty list is polymorphic" $
+                -- let nil = [] in if true ++ nil == [true] then 1 ++ nil else [2]
+                typeOf
+                    ( ELet
+                        (plain "nil")
+                        (EList [])
+                        ( EIf
+                            (EOp OEq (cons true (EVar "nil")) (EList [true]))
+                            (cons (lit 1) (EVar "nil"))
+                            (EList [lit 2])
+                        )
+                    )
+                    @?= Right (list int)
+            , testCase "a lambda-bound list is monomorphic" $
+                -- \xs -> if 1 ++ xs == [] then true ++ xs else []
+                fails
+                    ( lam
+                        "xs"
+                        ( EIf
+                            (EOp OEq (cons (lit 1) (EVar "xs")) (EList []))
+                            (cons true (EVar "xs"))
+                            (EList [])
+                        )
+                    )
+            , testCase "a let-bound list constructor is polymorphic" $
+                -- let single = \x -> [x] in if single true == [true] then single 1 else []
+                typeOf
+                    ( ELet
+                        (plain "single")
+                        (lam "x" (EList [EVar "x"]))
+                        ( EIf
+                            (EOp OEq (EApp (EVar "single") true) (EList [true]))
+                            (EApp (EVar "single") (lit 1))
+                            (EList [])
+                        )
+                    )
+                    @?= Right (list int)
+            ]
+        , testGroup
+            "Annotations"
+            [ testCase "annotated list parameter" $
+                -- \(xs: [int]) -> xs  :  List Int -> List Int
+                typeOf (EAbs ("xs" .: TC (TCList aInt)) (EVar "xs")) @?= Right (list int ~> list int)
+            , testCase "annotated list parameter is enforced" $
+                -- (\(xs: [int]) -> xs) [true]
+                fails (EApp (EAbs ("xs" .: TC (TCList aInt)) (EVar "xs")) (EList [true]))
+            , testCase "annotation specializes cons" $
+                -- let c: int -> [int] -> [int] = \x -> \xs -> x ++ xs in c
+                typeOf
+                    ( ELet
+                        ("c" .: aInt --> TC (TCList aInt) --> TC (TCList aInt))
+                        (lam "x" (lam "xs" (cons (EVar "x") (EVar "xs"))))
+                        (EVar "c")
+                    )
+                    @?= Right (int ~> list int ~> list int)
+            , testCase "a list annotation is not an element annotation" $
+                -- let x: [int] = 1 in x
+                fails (ELet ("x" .: TC (TCList aInt)) (lit 1) (EVar "x"))
+            , testCase "nested list annotation" $
+                -- let x: [[int]] = [[]] in x
+                typeOf (ELet ("x" .: TC (TCList (TC (TCList aInt)))) (EList [EList []]) (EVar "x"))
+                    @?= Right (list (list int))
+            ]
+        , testGroup
+            "Programs"
+            [ testCase "a polymorphic top-level list function" $
+                -- let prepend (x, xs) = x ++ xs; prepend 1 [2]; prepend "a" []
+                typeOfProgram
+                    [ TEFun (plain "prepend") [plain "x", plain "xs"] (cons (EVar "x") (EVar "xs"))
+                    , TEExpr (app (EVar "prepend") [lit 1, EList [lit 2]])
+                    , TEExpr (app (EVar "prepend") [str' "a", EList []])
+                    ]
+                    @?= Right [list int, list str]
+            , testCase "a list-typed top-level function rejects other lists" $
+                -- let f (xs: [int]): [int] = xs; f [true]
+                assertLeft "should fail" $
+                    typeOfProgram
+                        [ TEFun ("f" .: TC (TCList aInt)) ["xs" .: TC (TCList aInt)] (EVar "xs")
+                        , TEExpr (EApp (EVar "f") (EList [true]))
+                        ]
+            , testCase "a top-level empty list is polymorphic" $
+                -- let nil = []; 1 ++ nil; "a" ++ nil
+                typeOfProgram
+                    [ TELet (plain "nil") (EList [])
+                    , TEExpr (cons (lit 1) (EVar "nil"))
+                    , TEExpr (cons (str' "a") (EVar "nil"))
+                    ]
+                    @?= Right [list int, list str]
             ]
         ]

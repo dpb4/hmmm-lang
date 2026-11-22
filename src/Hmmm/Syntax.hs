@@ -23,6 +23,7 @@ data Expr
     | EApp Expr Expr
     | EOp Operator Expr Expr
     | ELit Literal
+    | EList (List Expr)
     deriving (Eq)
 
 data Operator
@@ -36,6 +37,8 @@ data Operator
     | OLeq
     | OAnd
     | OOr
+    | OCons
+    | OAppend
     deriving (Eq)
 
 instance Show Operator where
@@ -49,6 +52,8 @@ instance Show Operator where
     show OLeq = "<="
     show OAnd = "and"
     show OOr = "or"
+    show OCons = "++"
+    show OAppend = "+++"
 
 instance Show Binding where
     show (Bind n (Just t)) = n ++ ": " ++ show t
@@ -63,6 +68,7 @@ instance Show Expr where
         EApp f a -> show f ++ "(" ++ show a ++ ")"
         EOp o a b -> show a ++ " " ++ show o ++ " " ++ show b
         ELit l -> show l
+        EList l -> show l
 
 -- | a literal value as written in source code
 data Literal

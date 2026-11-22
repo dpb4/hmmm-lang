@@ -20,10 +20,14 @@ import qualified Data.Set as S
 
 data ConcreteType = CInt | CBool | CStr deriving (Eq)
 
-data TypeConstructor t = TCFun t t deriving (Eq)
+data TypeConstructor t
+    = TCFun t t
+    | TCList t
+    deriving (Eq)
 
 instance (Show t) => Show (TypeConstructor t) where
     show (TCFun a b) = show a ++ " -> " ++ show b
+    show (TCList t) = "List " ++ show t
 
 data Type
     = T ConcreteType
@@ -87,11 +91,13 @@ instance (Substitutable t) => Substitutable (TypeConstructor t) where
           where
             i' = (applySubst s i)
             o' = (applySubst s o)
+        TCList e -> TCList $ applySubst s e
     freeTypeVars t = case t of
         TCFun i o -> S.union i' o'
           where
             i' = (freeTypeVars i)
             o' = (freeTypeVars o)
+        TCList e -> freeTypeVars e
 
 instance Substitutable TypeMaybe where
     applySubst s t = case t of
@@ -135,3 +141,4 @@ compose s1 s2 = M.map (applySubst s1) s2 `M.union` s1
 typeToMaybe :: Type -> TypeMaybe
 typeToMaybe (T t) = TLit t
 typeToMaybe (TC (TCFun a b)) = TCon $ TCFun (typeToMaybe a) (typeToMaybe b)
+typeToMaybe (TC (TCList e)) = TCon $ TCList (typeToMaybe e)

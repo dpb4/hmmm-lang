@@ -8,6 +8,7 @@ module Hmmm.Parser (
     parseId,
     parseIf,
     parseLet,
+    parseList,
     parseLit,
     parseType,
     runParseTopExprs,
@@ -45,7 +46,7 @@ lexer =
             { Tok.identStart = satisfy (\c -> isLetter c && c /= 'λ')
             , Tok.identLetter = alphaNum
             , Tok.reservedNames = ["if", "then", "else", "let", "in", "true", "false", "and", "or"]
-            , Tok.reservedOpNames = ["+", "-", "->", "=", ":", "\\", "λ", ",", "==", "/=", ">", "<", ">=", "<=", "and", "or"]
+            , Tok.reservedOpNames = ["+", "-", "->", "=", ":", "\\", "λ", ",", "==", "/=", ">", "<", ">=", "<=", "and", "or", "++", "+++"]
             }
 
 identifier :: Parser String
@@ -60,6 +61,9 @@ reservedOp = Tok.reservedOp lexer
 parens :: Parser a -> Parser a
 parens = Tok.parens lexer
 
+brackets :: Parser a -> Parser a
+brackets = Tok.brackets lexer
+
 whiteSpace :: Parser ()
 whiteSpace = Tok.whiteSpace lexer
 
@@ -68,6 +72,10 @@ opTable =
     [
         [ Infix (EOp OAdd <$ (continued *> reservedOp "+")) AssocLeft
         , Infix (EOp OSub <$ (continued *> reservedOp "-")) AssocLeft
+        ]
+    ,
+        [ Infix (EOp OCons <$ (continued *> reservedOp "++")) AssocRight
+        , Infix (EOp OAppend <$ (continued *> reservedOp "+++")) AssocRight
         ]
     ,
         [ Infix (EOp OEq <$ (continued *> reservedOp "==")) AssocNone
@@ -109,6 +117,7 @@ parseAtom =
         <|> parseAbs
         <|> parseLit
         <|> (EVar <$> parseId)
+        <|> parseList
         <|> parens parseExpr
 
 -- | an identifier that is not a reserved word
@@ -149,6 +158,10 @@ parseLit =
                 <|> (LStr <$> Tok.stringLiteral lexer)
             )
 
+-- | a list literal: @[]@, @[1, 2]@, @[f 1, a, b]@
+parseList :: Parser Expr
+parseList = EList <$> brackets (sepBy parseExpr (reservedOp ","))
+
 -- | a name with an optional type annotation: @x@ or @x: T@
 parseBinding :: Parser Binding
 parseBinding = Bind <$> parseId <*> optionMaybe (reservedOp ":" *> parseType)
@@ -157,13 +170,23 @@ parseBinding = Bind <$> parseId <*> optionMaybe (reservedOp ":" *> parseType)
 parseType :: Parser Type
 parseType = foldr1 (\a b -> TC (TCFun a b)) <$> sepBy1 parseTypeAtom (reservedOp "->")
 
+{- | list types can be written @[T]@ or @list T@;
+@list@ applies to a single type atom, so it binds tighter than @->@:
+@list int -> int@ = @(list int) -> int@
+-}
 parseTypeAtom :: Parser Type
-parseTypeAtom = parens parseType <|> (concrete =<< identifier) <?> "type"
+parseTypeAtom =
+    parens parseType
+        <|> (tlist <$> brackets parseType)
+        <|> (named =<< identifier)
+        <?> "type"
   where
-    concrete name = case name of
+    tlist = TC . TCList
+    named name = case name of
         "int" -> return $ T CInt
         "bool" -> return $ T CBool
         "str" -> return $ T CStr
+        "list" -> tlist <$> parseTypeAtom
         _ -> unexpected $ "type name " ++ show name
 
 {- | a top-level let is a function definition, a value definition, or,
