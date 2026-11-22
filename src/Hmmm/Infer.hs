@@ -10,6 +10,7 @@ module Hmmm.Infer (
     generalize,
     typeOf,
     typeOfProgram,
+    programContext,
 ) where
 
 import Control.Monad.Except
@@ -204,15 +205,16 @@ typeOf ctx e = do
     s <- runSolve cs
     return (applySubst s t)
 
-inferProgram :: [TopExpr] -> Infer [TypeMaybe]
-inferProgram [] = return []
+-- | the type of each top-level expression, and the context after the last definition
+inferProgram :: [TopExpr] -> Infer ([TypeMaybe], Context)
+inferProgram [] = (,) [] <$> ask
 inferProgram (top : rest) = case top of
     TELet bind val -> define bind (infer val)
     TEFun (Bind name rett) params body -> define (Bind name Nothing) (inferRecFun name params rett body)
     TEExpr e -> do
         (t, cs) <- listen (infer e)
         s <- either throwError return $ runSolve cs
-        (applySubst s t :) <$> inferProgram rest
+        (\(ts, ctx) -> (applySubst s t : ts, ctx)) <$> inferProgram rest
   where
     define bind val = do
         (name, t, s) <- inferDefinition bind val
@@ -220,6 +222,13 @@ inferProgram (top : rest) = case top of
 
 -- | the type of each top-level expression in a program, in order
 typeOfProgram :: Context -> [TopExpr] -> Either String [TypeMaybe]
-typeOfProgram ctx prog = do
-    (ts, _, _) <- runIdentity $ runExceptT $ runRWST (inferProgram prog) ctx 0
-    return ts
+typeOfProgram ctx prog = fst <$> checkProgram ctx prog
+
+-- | the context after all of a program's definitions, eg. to check another program in
+programContext :: Context -> [TopExpr] -> Either String Context
+programContext ctx prog = snd <$> checkProgram ctx prog
+
+checkProgram :: Context -> [TopExpr] -> Either String ([TypeMaybe], Context)
+checkProgram ctx prog = do
+    (r, _, _) <- runIdentity $ runExceptT $ runRWST (inferProgram prog) ctx 0
+    return r

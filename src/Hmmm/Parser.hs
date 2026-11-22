@@ -47,6 +47,7 @@ lexer =
         emptyDef
             { Tok.identStart = satisfy (\c -> isLetter c && c /= 'λ')
             , Tok.identLetter = alphaNum <|> char '?'
+            , Tok.commentLine = "--"
             , Tok.reservedNames = ["if", "then", "else", "let", "in", "true", "false", "and", "or"]
             , Tok.reservedOpNames = ["+", "-", "->", "=", ":", "\\", "λ", ",", "==", "/=", ">", "<", ">=", "<=", "and", "or", "++", "+++"]
             }
@@ -133,16 +134,18 @@ parseIf =
         <*> (reserved "then" *> parseExpr)
         <*> (reserved "else" *> parseExpr)
 
-{- | an annotated lambda parameter needs parentheses;
-@λx: int -> x@ is ambiguous, the arrow could belong to the type or the lambda
+{- | a lambda takes one bare parameter, @λx -> e@, or a parenthesized list, @λ(a, b: int) -> e@;
+an annotated parameter needs parentheses, since in
+@λx: int -> x@ the arrow could belong to the type or the lambda
 -}
 parseAbs :: Parser Expr
-parseAbs =
-    EAbs
-        <$> ((reservedOp "\\" <|> reservedOp "λ") *> (parens parseBinding <|> unannotated))
-        <*> (reservedOp "->" *> parseExpr)
+parseAbs = do
+    params <- (reservedOp "\\" <|> reservedOp "λ") *> (parens (sepBy1 parseBinding (reservedOp ",")) <|> unannotated)
+    body <- reservedOp "->" *> parseExpr
+    -- several parameters are sugar for nested lambdas: λ(a, b) -> e = λa -> λb -> e
+    return $ foldr EAbs body params
   where
-    unannotated = (`Bind` Nothing) <$> parseId
+    unannotated = (: []) . (`Bind` Nothing) <$> parseId
 
 parseLet :: Parser Expr
 parseLet =

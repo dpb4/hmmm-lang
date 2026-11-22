@@ -7,6 +7,7 @@ module Hmmm.Eval (
     apply,
     runEval,
     runEvalProgram,
+    programEnv,
     display,
     Value (..),
 ) where
@@ -68,10 +69,15 @@ runEval env e = runExcept (runReaderT (eval e) env)
 
 -- | evaluate a program, starting from the given environment (eg. the builtins)
 runEvalProgram :: Env -> [TopExpr] -> Either String [Value]
-runEvalProgram env prog = runExcept (runReaderT (evalProgram prog) env)
+runEvalProgram env prog = fst <$> runExcept (runReaderT (evalProgram prog) env)
 
-evalProgram :: [TopExpr] -> Eval [Value]
-evalProgram [] = return []
+-- | the environment after all of a program's definitions, eg. to run another program in
+programEnv :: Env -> [TopExpr] -> Either String Env
+programEnv env prog = snd <$> runExcept (runReaderT (evalProgram prog) env)
+
+-- | the value of each top-level expression, and the environment after the last definition
+evalProgram :: [TopExpr] -> Eval ([Value], Env)
+evalProgram [] = (,) [] <$> ask
 evalProgram (top : rest) = case top of
     TELet (Bind name _) val -> define name val
     TEFun (Bind name _) [] body -> define name body
@@ -81,7 +87,9 @@ evalProgram (top : rest) = case top of
         env <- ask
         let self = VClosure (M.insert name self env) param (foldr EAbs body params)
         local (M.insert name self) (evalProgram rest)
-    TEExpr e -> (:) <$> eval e <*> evalProgram rest
+    TEExpr e -> do
+        v <- eval e
+        (\(vs, env) -> (v : vs, env)) <$> evalProgram rest
   where
     define name val = do
         v <- eval val

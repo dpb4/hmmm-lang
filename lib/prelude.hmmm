@@ -1,0 +1,87 @@
+-- library functions available to every program
+-- it is checked and run before anything else, with the builtins in scope
+-- it may only contain definitions
+
+
+-- booleans
+
+let not (b: bool) = if b then false else true
+
+
+
+-- folds
+
+let foldr (f, z, xs) =
+    if empty? xs then
+        z
+    else
+        f (head xs) (foldr f z (tail xs))
+
+let foldl (f, z, xs) =
+    if empty? xs then
+        z
+    else
+        foldl f (f z (head xs)) (tail xs)
+
+
+
+-- transforming lists
+
+let map (f, xs) =
+    if empty? xs then
+        []
+    else
+        f (head xs) ++ map f (tail xs)
+
+let filter (p, xs) =
+  if empty? xs then
+      []
+  else if p (head xs) then
+      head xs ++ filter p (tail xs)
+  else
+      filter p (tail xs)
+
+let reverse (xs) = foldl (λ(acc, x) -> x ++ acc) [] xs
+
+let concat (xss) = foldr (λ(xs, acc) -> xs +++ acc) [] xss
+
+
+
+-- querying lists
+
+let length (xs) = foldl (λ(n, x) -> n + 1) 0 xs
+
+let sum (xs) = foldl (λ(a, b) -> a + b) 0 xs
+
+let any? (p, xs) = foldr (λ(x, acc) -> p x or acc) false xs
+
+let all? (p, xs) = foldr (λ(x, acc) -> p x and acc) true xs
+
+let elem? (y, xs) = any? (λx -> x == y) xs
+
+
+
+-- sublists
+
+let take (n, xs) =
+    if n <= 0 or empty? xs then
+        []
+    else
+        head xs ++ take (n - 1) (tail xs)
+
+let drop (n, xs) =
+    if n <= 0 or empty? xs then
+        xs
+    else
+        drop (n - 1) (tail xs)
+
+
+
+-- building lists
+
+let range (lo: int, hi: int): [int] =
+    if lo > hi then
+        []
+    else
+        lo ++ range (lo + 1) hi
+

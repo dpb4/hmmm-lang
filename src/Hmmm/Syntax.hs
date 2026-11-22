@@ -77,7 +77,14 @@ data Literal
     = LInt Integer
     | LBool Bool
     | LChar Char
-    deriving (Show, Eq)
+    deriving (Eq)
+
+-- | literals show as they are written in source code
+instance Show Literal where
+    show (LInt i) = show i
+    show (LBool True) = "true"
+    show (LBool False) = "false"
+    show (LChar c) = show c
 
 data TopExpr
     = TEFun Binding (List Binding) Expr

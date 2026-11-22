@@ -112,6 +112,13 @@ parserTests =
             [ testCase "leading and trailing whitespace" $ "  x  " `parsesTo` v "x"
             , testCase "newlines" $ "let x = 1\nin x" `parsesTo` ELet (b "x") (int 1) (v "x")
             , testCase "no whitespace around operators" $ "1+2" `parsesTo` EOp OAdd (int 1) (int 2)
+            , testCase "line comment" $ "1 -- one" `parsesTo` int 1
+            , testCase "comment between tokens" $ "1 + -- one\n  2" `parsesTo` EOp OAdd (int 1) (int 2)
+            , testCase "a comment alone is empty input" $ rejects "-- nothing"
+            , testCase "-- inside a string is not a comment" $ "\"a -- b\"" `parsesTo` strLit "a -- b"
+            , testCase "comments between top-level items" $
+                "-- first\nlet g = 1\n-- second\ng"
+                    `programIs` [TELet (b "g") (int 1), TEExpr (v "g")]
             , testCase "empty input fails" $ rejects ""
             , testCase "trailing garbage fails" $ rejects "1 )"
             ]
@@ -274,6 +281,27 @@ parserTests =
                 "(\\x -> x) 1" `parsesTo` EApp (EAbs (b "x") (v "x")) (int 1)
             , testCase "variable named f" $
                 "\\f -> f 1" `parsesTo` EAbs (b "f") (EApp (v "f") (int 1))
+            , testCase "parenthesized single parameter" $ "\\(x) -> x" `parsesTo` EAbs (b "x") (v "x")
+            , testCase "two parameters are nested lambdas" $
+                "\\(x, y) -> x" `parsesTo` EAbs (b "x") (EAbs (b "y") (v "x"))
+            , testCase "three parameters" $
+                "λ(a, b, c) -> a"
+                    `parsesTo` EAbs (b "a") (EAbs (b "b") (EAbs (b "c") (v "a")))
+            , testCase "several parameters are the same as nested lambdas" $
+                runParse "\\(a, b) -> a + b" @?= runParse "\\a -> \\b -> a + b"
+            , testCase "parameters can be annotated" $
+                "\\(x: int, y, f: int -> bool) -> f x"
+                    `parsesTo` EAbs
+                        ("x" .: tInt)
+                        (EAbs (b "y") (EAbs ("f" .: tInt ~> tBool) (EApp (v "f") (v "x"))))
+            , testCase "no whitespace" $ "\\(x,y)->x" `parsesTo` EAbs (b "x") (EAbs (b "y") (v "x"))
+            , testCase "a multi-parameter lambda as an argument" $
+                "f (λ(a, b) -> a) 0"
+                    `parsesTo` EApp (EApp (v "f") (EAbs (b "a") (EAbs (b "b") (v "a")))) (int 0)
+            , testCase "no parameters fails" $ rejects "\\() -> 1"
+            , testCase "trailing comma fails" $ rejects "\\(x,) -> x"
+            , testCase "unparenthesized parameters fail" $ rejects "\\x, y -> x"
+            , testCase "several bare parameters fail" $ rejects "\\x y -> x"
             ]
         , testGroup
             "Type annotations"
